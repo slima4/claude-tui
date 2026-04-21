@@ -157,8 +157,19 @@ python3 claudetui.py --help          # test dispatcher
 ## Release Workflow
 
 1. Bump `_FALLBACK_VERSION` in `claudetui.py`
-2. Commit, tag (`git tag v0.X.Y`), push with `--tags`
-3. Version is auto-detected from git tags at runtime; fallback used for curl/brew installs
+2. If you added/renamed/removed a `claude_tui_*` shared package, update `.brew-manifest.json` to match (the `manifest-check.yml` CI fails otherwise)
+3. Commit, tag (`git tag v0.X.Y`), push with `--tags`
+4. `release.yml` fires automatically: creates the GitHub Release, computes the tarball SHA256, opens a PR against `slima4/homebrew-claude-tui` with the bumped url + sha256
+5. Wait for the tap PR's `Test formula` checks to go green, then merge
+
+Version is auto-detected from git tags at runtime; fallback used for curl/brew installs.
+
+## Brew packaging contract
+
+The Homebrew formula lives at [`slima4/homebrew-claude-tui`](https://github.com/slima4/homebrew-claude-tui). Two things to know when changing this repo:
+
+- **`.brew-manifest.json`** enumerates every top-level `claude_tui_*` shared package. The formula reads it at install time to know what to import-test. If you add `claude_tui_widgets/`, also add `"claude_tui_widgets"` to `shared_packages` in the manifest. The `manifest-check.yml` workflow enforces this on every push/PR.
+- **The formula installs both `claude-code-*` and `claude_tui_*` directories** under `libexec/`. The dispatcher (`claudetui.py`) injects `libexec` into `PYTHONPATH` so subcommands can import the shared packages. Don't move files between top-level dirs without checking the formula.
 
 ## Gotchas
 
