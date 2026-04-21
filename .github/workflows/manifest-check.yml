@@ -1,0 +1,53 @@
+name: Brew manifest sync
+
+# Fails if .brew-manifest.json drifts from the actual top-level claude_tui_*
+# directories. The Homebrew formula reads this manifest to know which shared
+# packages to install + import-test, so a stale manifest silently breaks the
+# packaging. See ../../.brew-manifest.json and homebrew-claude-tui#6 for context.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "claude_tui_*/**"
+      - ".brew-manifest.json"
+      - ".github/workflows/manifest-check.yml"
+  pull_request:
+    paths:
+      - "claude_tui_*/**"
+      - ".brew-manifest.json"
+      - ".github/workflows/manifest-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare manifest to filesystem
+        run: |
+          set -euo pipefail
+          # `|| true` keeps `set -e` from killing the step when there are zero
+          # matches — empty ACTUAL with non-empty MANIFEST then surfaces as a
+          # real diff in the comparison below.
+          ACTUAL=$(ls -d claude_tui_*/ 2>/dev/null | sed 's|/$||' | sort | tr '\n' ',' | sed 's/,$//' || true)
+          MANIFEST=$(python3 -c '
+          import json
+          with open(".brew-manifest.json") as f:
+              data = json.load(f)
+          print(",".join(sorted(data["shared_packages"])))
+          ')
+          if [[ "${ACTUAL}" != "${MANIFEST}" ]]; then
+            echo "::error::.brew-manifest.json is out of sync with claude_tui_* directories."
+            echo "  filesystem: ${ACTUAL}"
+            echo "  manifest:   ${MANIFEST}"
+            echo ""
+            echo "If you added/renamed/removed a claude_tui_* directory, update .brew-manifest.json"
+            echo "to match. Otherwise the Homebrew formula will install the new package without"
+            echo "verifying it imports cleanly (the regression class from claude-tui#6)."
+            exit 1
+          fi
+          echo "OK: manifest matches filesystem (${ACTUAL})"

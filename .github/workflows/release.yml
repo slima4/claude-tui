@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
@@ -12,43 +12,72 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
         run: |
-          gh release create "${{ github.ref_name }}" \
-            --title "${{ github.ref_name }}" \
-            --generate-notes
+          gh release create "${TAG}" --title "${TAG}" --generate-notes
 
-      - name: Compute SHA256
+      - name: Compute tarball SHA256
         id: sha
-        run: |
-          URL="https://github.com/${{ github.repository }}/archive/refs/tags/${{ github.ref_name }}.tar.gz"
-          SHA256=$(curl -sL "$URL" | sha256sum | awk '{print $1}')
-          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
-          echo "SHA256: $SHA256"
-
-      - name: Update Homebrew formula
         env:
-          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
         run: |
-          TAG="${{ github.ref_name }}"
-          SHA256="${{ steps.sha.outputs.sha256 }}"
+          URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
+          SHA256=$(curl -sL "${URL}" | sha256sum | awk '{print $1}')
+          {
+            echo "sha256=${SHA256}"
+            echo "url=${URL}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "url:    ${URL}"
+          echo "sha256: ${SHA256}"
 
-          # Clone the tap repo
-          git clone "https://x-access-token:${TAP_TOKEN}@github.com/slima4/homebrew-claude-tui.git" tap
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: slima4/homebrew-claude-tui
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+
+      - name: Update formula
+        env:
+          TAG: ${{ github.ref_name }}
+          URL: ${{ steps.sha.outputs.url }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        # `|` as sed delimiter so the URL's slashes don't conflict.
+        # The `revision N` line is removed because revision resets to implicit 0
+        # on a new upstream tag — we only need it for formula-only fixes against
+        # an already-released tarball.
+        run: |
           cd tap
+          sed -i "s|url \".*\"|url \"${URL}\"|" Formula/claude-tui.rb
+          sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|" Formula/claude-tui.rb
+          sed -i "/^ *revision /d" Formula/claude-tui.rb
+          echo "--- formula head after edit ---"
+          head -10 Formula/claude-tui.rb
 
-          # Update URL and SHA256
-          sed -i "s|/tags/v[0-9.]*\.tar\.gz|/tags/${TAG}.tar.gz|" Formula/claude-tui.rb
-          sed -i "s|sha256 \"[a-f0-9]*\"|sha256 \"${SHA256}\"|" Formula/claude-tui.rb
+      - name: Open PR against tap
+        # peter-evans/create-pull-request handles branch create + commit + push +
+        # PR open in one step. Auth uses the same PAT as checkout so the PR
+        # author triggers the tap's CI workflow (test-formula.yml).
+        uses: peter-evans/create-pull-request@v6
+        with:
+          path: tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          branch: bump-${{ github.ref_name }}
+          delete-branch: true
+          commit-message: "Update claude-tui to ${{ github.ref_name }}"
+          title: "Update claude-tui to ${{ github.ref_name }}"
+          body: |
+            Automated formula bump from [`${{ github.repository }}@${{ github.ref_name }}`](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}).
 
-          # Commit and push
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add Formula/claude-tui.rb
-          git commit -m "Update claude-tui to ${TAG}"
-          git push
+            - **URL:** `${{ steps.sha.outputs.url }}`
+            - **SHA256:** `${{ steps.sha.outputs.sha256 }}`
+
+            Tap CI will validate this bump on merge candidates. Review the diff,
+            wait for the `Test formula` checks to go green, then merge.

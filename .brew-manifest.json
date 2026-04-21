@@ -1,0 +1,7 @@
+{
+  "$schema_comment": "Read by the Homebrew formula at install time. The shared_packages list must enumerate every top-level claude_tui_* directory. Drift is enforced by .github/workflows/manifest-check.yml.",
+  "shared_packages": [
+    "claude_tui_components",
+    "claude_tui_core"
+  ]
+}
