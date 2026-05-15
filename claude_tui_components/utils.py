@@ -56,7 +56,7 @@ def get_terminal_cols():
             if len(parts) < 2:
                 break
             ppid, tty = parts[0], parts[1]
-            if tty not in ("??", ""):
+            if tty not in ("??", "?", ""):
                 fd = os.open(f"/dev/{tty}", os.O_RDONLY)
                 try:
                     res = fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\x00" * 8)
