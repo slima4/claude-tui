@@ -4,6 +4,11 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing release tag to dry-run the tap-PR flow against (e.g. v0.8.4). No GitHub Release is created; a throwaway formula change opens a tap PR that is immediately closed to prove HOMEBREW_TAP_TOKEN has Contents + Pull requests write."
+        required: true
 
 permissions:
   contents: write
@@ -11,14 +16,24 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # The tag to operate on: the pushed tag for a real release, or the
+      # dispatch input for a dry run. Every downstream step reads RELEASE_TAG,
+      # never github.ref_name directly — on workflow_dispatch ref_name is a
+      # branch (main), not a tag, which would break the URL/branch/sed logic.
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' }}
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Create GitHub Release
+        # Real releases only. A dry run reuses an already-released tag's
+        # tarball and must not create or mutate a Release.
+        if: github.event_name == 'push'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           gh release create "${TAG}" --title "${TAG}" --generate-notes
 
@@ -26,7 +41,7 @@ jobs:
         id: sha
         env:
           REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
           SHA256=$(curl -sL "${URL}" | sha256sum | awk '{print $1}')
@@ -46,7 +61,7 @@ jobs:
 
       - name: Update formula
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
           URL: ${{ steps.sha.outputs.url }}
           SHA256: ${{ steps.sha.outputs.sha256 }}
         # `|` as sed delimiter so the URL's slashes don't conflict.
@@ -60,6 +75,18 @@ jobs:
           sed -i "/^ *revision /d" Formula/claude-tui.rb
           echo "--- formula head after edit ---"
           head -10 Formula/claude-tui.rb
+
+      - name: Force a diff for the dry run
+        # Dry-running against an already-released tag yields no formula change
+        # (url/sha already current), so peter-evans would no-op and never
+        # exercise the token's Pull requests scope — the exact thing we want
+        # to validate. Append a unique throwaway line so a branch is always
+        # pushed and a PR always opened; it is discarded when the dry-run PR
+        # and its branch are deleted below, so the tap is never mutated.
+        if: env.DRY_RUN == 'true'
+        run: |
+          cd tap
+          echo "# dry-run token check ${GITHUB_RUN_ID} $(date -u +%FT%TZ)" >> Formula/claude-tui.rb
 
       - name: Open PR against tap
         # peter-evans/create-pull-request handles branch create + commit + push +
@@ -78,12 +105,12 @@ jobs:
         with:
           path: tap
           token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          branch: bump-${{ github.ref_name }}
+          branch: bump-${{ env.RELEASE_TAG }}
           delete-branch: true
-          commit-message: "Update claude-tui to ${{ github.ref_name }}"
-          title: "Update claude-tui to ${{ github.ref_name }}"
+          commit-message: "Update claude-tui to ${{ env.RELEASE_TAG }}"
+          title: "${{ env.DRY_RUN == 'true' && '[dry-run] ' || '' }}Update claude-tui to ${{ env.RELEASE_TAG }}"
           body: |
-            Automated formula bump from [`${{ github.repository }}@${{ github.ref_name }}`](https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}).
+            Automated formula bump from [`${{ github.repository }}@${{ env.RELEASE_TAG }}`](https://github.com/${{ github.repository }}/releases/tag/${{ env.RELEASE_TAG }}).
 
             - **URL:** `${{ steps.sha.outputs.url }}`
             - **SHA256:** `${{ steps.sha.outputs.sha256 }}`
@@ -98,7 +125,7 @@ jobs:
         # the release by hand instead of forcing a re-diagnosis.
         if: steps.tap_pr.outcome == 'failure'
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ env.RELEASE_TAG }}
         run: |
           BRANCH="bump-${TAG}"
           {
@@ -119,4 +146,36 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           echo "::error::Tap PR not opened. Branch ${BRANCH} pushed; open the PR manually (see job summary)."
+          exit 1
+
+      - name: Close dry-run PR
+        # A dry run exists only to prove HOMEBREW_TAP_TOKEN can push a branch
+        # AND open a PR on the tap. Once the PR exists the token is proven, so
+        # close it and delete the branch to leave no residue (the throwaway
+        # formula line goes with it). Closing also re-exercises the
+        # pull-requests:write scope. Runs only when the PR step succeeded and
+        # actually produced a PR.
+        if: env.DRY_RUN == 'true' && steps.tap_pr.outcome == 'success' && steps.tap_pr.outputs.pull-request-number != ''
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          PR: ${{ steps.tap_pr.outputs.pull-request-number }}
+          BRANCH: bump-${{ env.RELEASE_TAG }}
+        run: |
+          echo "Dry run: closing tap PR #${PR} and deleting branch ${BRANCH}"
+          gh pr close "${PR}" --repo slima4/homebrew-claude-tui --delete-branch
+          {
+            echo "## Dry run OK"
+            echo
+            echo "\`HOMEBREW_TAP_TOKEN\` pushed branch \`${BRANCH}\`, opened tap"
+            echo "PR #${PR}, and closed it. Contents + Pull requests write"
+            echo "scopes confirmed. No residue left on the tap."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Fail if dry run did not open a PR
+        # Belt-and-suspenders: if the PR step "succeeded" but produced no PR
+        # (e.g. token silently lacked scope, or no diff), the close step is
+        # skipped and the token is NOT proven. Make that loud instead of green.
+        if: env.DRY_RUN == 'true' && (steps.tap_pr.outcome != 'success' || steps.tap_pr.outputs.pull-request-number == '')
+        run: |
+          echo "::error::Dry run did not open a tap PR (outcome=${{ steps.tap_pr.outcome }}, pr=${{ steps.tap_pr.outputs.pull-request-number }}). HOMEBREW_TAP_TOKEN scopes NOT confirmed."
           exit 1
