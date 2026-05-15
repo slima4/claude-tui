@@ -65,6 +65,15 @@ jobs:
         # peter-evans/create-pull-request handles branch create + commit + push +
         # PR open in one step. Auth uses the same PAT as checkout so the PR
         # author triggers the tap's CI workflow (test-formula.yml).
+        #
+        # HOMEBREW_TAP_TOKEN must be a fine-grained PAT scoped to
+        # slima4/homebrew-claude-tui with BOTH:
+        #   - Contents: Read and write       (push the bump branch)
+        #   - Pull requests: Read and write  (open the PR)
+        # A token with only Contents pushes the branch fine but fails PR
+        # creation with "Resource not accessible by personal access token".
+        id: tap_pr
+        continue-on-error: true
         uses: peter-evans/create-pull-request@v6
         with:
           path: tap
@@ -81,3 +90,33 @@ jobs:
 
             Tap CI will validate this bump on merge candidates. Review the diff,
             wait for the `Test formula` checks to go green, then merge.
+
+      - name: Surface manual recovery if PR step failed
+        # peter-evans pushes the bump branch before opening the PR, so a
+        # token-scope failure leaves a usable branch with the correct
+        # url/sha256. Fail the job loudly with the exact one-liner to finish
+        # the release by hand instead of forcing a re-diagnosis.
+        if: steps.tap_pr.outcome == 'failure'
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          BRANCH="bump-${TAG}"
+          {
+            echo "## Tap PR step failed"
+            echo
+            echo "The \`${BRANCH}\` branch was pushed to slima4/homebrew-claude-tui"
+            echo "with the correct url/sha256, but the PR could not be opened."
+            echo "Most likely cause: \`HOMEBREW_TAP_TOKEN\` is missing the"
+            echo "\`Pull requests: Read and write\` permission on the tap repo."
+            echo
+            echo "Finish the release manually:"
+            echo
+            echo '```'
+            echo "gh pr create --repo slima4/homebrew-claude-tui \\"
+            echo "  --base main --head ${BRANCH} \\"
+            echo "  --title \"claude-tui ${TAG}\" \\"
+            echo "  --body \"Automated formula bump for ${TAG}.\""
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::error::Tap PR not opened. Branch ${BRANCH} pushed; open the PR manually (see job summary)."
+          exit 1
