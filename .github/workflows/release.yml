@@ -119,33 +119,65 @@ jobs:
             wait for the `Test formula` checks to go green, then merge.
 
       - name: Surface manual recovery if PR step failed
-        # peter-evans pushes the bump branch before opening the PR, so a
-        # token-scope failure leaves a usable branch with the correct
-        # url/sha256. Fail the job loudly with the exact one-liner to finish
-        # the release by hand instead of forcing a re-diagnosis.
+        # peter-evans does push-branch THEN open-PR in one step, so a failure
+        # can be at either stage and the two need different recovery:
+        #   - branch pushed, PR-open failed  -> Pull requests scope missing;
+        #     recover with `gh pr create` against the existing branch.
+        #   - push itself failed             -> Contents scope missing; there
+        #     is no branch, so `gh pr create` would also fail. Fix the PAT
+        #     and re-run.
+        # Don't guess which: query the tap for the branch as ground truth.
+        # The tap is a public Homebrew tap, so an unauthenticated ls-remote
+        # is sufficient and never exposes HOMEBREW_TAP_TOKEN.
         if: steps.tap_pr.outcome == 'failure'
         env:
           TAG: ${{ env.RELEASE_TAG }}
+          REPO: ${{ github.repository }}
         run: |
           BRANCH="bump-${TAG}"
-          {
-            echo "## Tap PR step failed"
-            echo
-            echo "The \`${BRANCH}\` branch was pushed to slima4/homebrew-claude-tui"
-            echo "with the correct url/sha256, but the PR could not be opened."
-            echo "Most likely cause: \`HOMEBREW_TAP_TOKEN\` is missing the"
-            echo "\`Pull requests: Read and write\` permission on the tap repo."
-            echo
-            echo "Finish the release manually:"
-            echo
-            echo '```'
-            echo "gh pr create --repo slima4/homebrew-claude-tui \\"
-            echo "  --base main --head ${BRANCH} \\"
-            echo "  --title \"claude-tui ${TAG}\" \\"
-            echo "  --body \"Automated formula bump for ${TAG}.\""
-            echo '```'
-          } >> "${GITHUB_STEP_SUMMARY}"
-          echo "::error::Tap PR not opened. Branch ${BRANCH} pushed; open the PR manually (see job summary)."
+          TAP="slima4/homebrew-claude-tui"
+          if git ls-remote --exit-code --heads \
+               "https://github.com/${TAP}.git" "refs/heads/${BRANCH}" >/dev/null 2>&1; then
+            {
+              echo "## Tap PR step failed (branch pushed, PR not opened)"
+              echo
+              echo "The \`${BRANCH}\` branch was pushed to ${TAP} with the"
+              echo "correct url/sha256, but the PR could not be opened."
+              echo "Most likely cause: \`HOMEBREW_TAP_TOKEN\` is missing the"
+              echo "\`Pull requests: Read and write\` permission on the tap repo."
+              echo
+              echo "Finish the release manually:"
+              echo
+              echo '```'
+              echo "gh pr create --repo ${TAP} \\"
+              echo "  --base main --head ${BRANCH} \\"
+              echo "  --title \"claude-tui ${TAG}\" \\"
+              echo "  --body \"Automated formula bump for ${TAG}.\""
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::error::Tap PR not opened. Branch ${BRANCH} pushed; open the PR manually (see job summary)."
+          else
+            {
+              echo "## Tap PR step failed (branch NOT pushed)"
+              echo
+              echo "The \`${BRANCH}\` branch does not exist on ${TAP}: the push"
+              echo "itself failed, so there is no branch to open a PR from and"
+              echo "\`gh pr create\` would also fail."
+              echo "Cause: \`HOMEBREW_TAP_TOKEN\` is missing the"
+              echo "\`Contents: Read and write\` permission on the tap repo,"
+              echo "or its repository access does not include ${TAP}."
+              echo
+              echo "Recovery: fix the PAT scopes (Contents + Pull requests,"
+              echo "both Read and write; repo access scoped to ${TAP}), then"
+              echo "re-run the release for tag \`${TAG}\`. Validate the token"
+              echo "without cutting a release with a dry run:"
+              echo
+              echo '```'
+              echo "gh workflow run release.yml --repo ${REPO} -f tag=${TAG}"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+            echo "::error::Tap branch ${BRANCH} was not pushed (HOMEBREW_TAP_TOKEN missing Contents: write). Fix the PAT and re-run (see job summary)."
+          fi
           exit 1
 
       - name: Close dry-run PR
