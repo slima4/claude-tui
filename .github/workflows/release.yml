@@ -13,6 +13,13 @@ on:
 permissions:
   contents: write
 
+# Serialize per tag: a re-pushed tag or a dispatch overlapping a real
+# release must not race two runs on the same bump-<tag> branch / tap.
+# cancel-in-progress stays false — never kill a release mid tap-push.
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -43,8 +50,22 @@ jobs:
           REPO: ${{ github.repository }}
           TAG: ${{ env.RELEASE_TAG }}
         run: |
+          set -euo pipefail
           URL="https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz"
-          SHA256=$(curl -sL "${URL}" | sha256sum | awk '{print $1}')
+          # --fail: a non-2xx (e.g. tag tarball not yet published) is a hard
+          # error, not an HTML/0-byte body silently hashed into a bogus
+          # sha256 that ships to the tap and breaks `brew install` for users.
+          # --retry-all-errors: the codeload tarball can lag a few seconds
+          # behind the GitHub Release, so retry through transient 404s too.
+          curl --fail --location --silent --show-error \
+               --retry 5 --retry-delay 3 --retry-all-errors \
+               -o tarball.tgz "${URL}"
+          SHA256=$(sha256sum tarball.tgz | awk '{print $1}')
+          if ! printf '%s' "${SHA256}" | grep -Eq '^[0-9a-f]{64}$'; then
+            echo "::error::Computed SHA256 is not a 64-hex digest: '${SHA256}'"
+            exit 1
+          fi
+          rm -f tarball.tgz
           {
             echo "sha256=${SHA256}"
             echo "url=${URL}"
