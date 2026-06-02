@@ -2,58 +2,76 @@
 
 import json
 import os
+from datetime import datetime, timezone
 from typing import TypedDict
 
-from .constants import (
-    DEFAULT_CONTEXT_LIMIT,
-    MODEL_CONTEXT_WINDOW,
-    MODEL_PRICING,
-)
+from .constants import DEFAULT_CONTEXT_LIMIT
 from .debug import debug_log
 
 
 class InputData(TypedDict):
     model: str
-    model_id: str
     cwd: str
     transcript_path: str
     session_id: str
+    context_tokens: int
+    context_limit: int
+    cost_usd: float
+    duration_ms: int
+    usage: dict | None
 
 
-def get_context_limit(model_id):
-    for key, limit in MODEL_CONTEXT_WINDOW.items():
-        if key in model_id:
-            return limit
-    return DEFAULT_CONTEXT_LIMIT
+def _build_usage_from_rate_limits(rate_limits: dict) -> dict | None:
+    """Map Claude Code's stdin `rate_limits` into the usage-bar shape.
 
-
-def get_model_pricing(model_id):
-    for key, pricing in MODEL_PRICING.items():
-        if key in model_id:
-            return pricing
-    return MODEL_PRICING["claude-sonnet-4-6"]
+    Claude Code provides `used_percentage` (0-100) and `resets_at`
+    (Unix epoch seconds); the bar formatters want `utilization` and an
+    ISO `resets_at`. Only present for Pro/Max after the first API response.
+    """
+    if not isinstance(rate_limits, dict):
+        return None
+    out = {}
+    for key in ("five_hour", "seven_day"):
+        window = rate_limits.get(key)
+        if not isinstance(window, dict):
+            continue
+        pct = window.get("used_percentage")
+        if pct is None:
+            continue
+        resets_iso = ""
+        resets_at = window.get("resets_at")
+        if isinstance(resets_at, (int, float)):
+            resets_iso = datetime.fromtimestamp(resets_at, tz=timezone.utc).isoformat()
+        out[key] = {"utilization": pct, "resets_at": resets_iso}
+    return out or None
 
 
 def parse_input_data(data: dict) -> InputData:
+    ctx = data.get("context_window", {}) or {}
+    cost = data.get("cost", {}) or {}
     return {
         "model": data.get("model", {}).get("display_name", "unknown"),
-        "model_id": data.get("model", {}).get("id", ""),
         "cwd": os.path.basename(data.get("workspace", {}).get("current_dir", "")),
         "transcript_path": data.get("transcript_path", ""),
         "session_id": data.get("session_id", "")[:8],
+        # context_window.total_input_tokens already = input + cache_creation +
+        # cache_read (output excluded), matching used_percentage's formula.
+        "context_tokens": ctx.get("total_input_tokens") or 0,
+        "context_limit": ctx.get("context_window_size") or DEFAULT_CONTEXT_LIMIT,
+        "cost_usd": cost.get("total_cost_usd") or 0.0,
+        "duration_ms": cost.get("total_duration_ms") or 0,
+        "usage": _build_usage_from_rate_limits(data.get("rate_limits", {})),
     }
 
 
 def _new_metrics():
     return {
-        "context_tokens": 0,
         "input_tokens_total": 0,
         "cache_read_tokens_total": 0,
         "cache_creation_tokens_total": 0,
         "output_tokens_total": 0,
         "compact_count": 0,
         "files_touched": set(),
-        "session_start": None,
         "tool_calls": 0,
         "tool_errors": 0,
         "subagent_count": 0,
@@ -86,23 +104,6 @@ def _iter_json_objects(lines):
             yield json.loads(line)
         except json.JSONDecodeError:
             continue
-
-
-def _extract_latest_context_tokens(lines, result):
-    for obj in _iter_json_objects(reversed(lines)):
-        if _is_compaction_entry(obj):
-            break
-        if obj.get("type") == "assistant" and "message" in obj and "usage" in obj["message"]:
-            usage = obj["message"]["usage"]
-            keys = [
-                "input_tokens",
-                "cache_creation_input_tokens",
-                "cache_read_input_tokens",
-                "output_tokens",
-            ]
-            if all(k in usage for k in keys):
-                result["context_tokens"] = sum(usage[k] for k in keys)
-                return
 
 
 def _update_turn_state(obj, result):
@@ -232,12 +233,8 @@ def parse_transcript(transcript_path, context_limit=None):
         debug_log(f"parse_transcript could not read: {transcript_path}")
         return result
 
-    _extract_latest_context_tokens(lines, result)
-
     active_subagents = set()
     for obj in _iter_json_objects(lines):
-        if result["session_start"] is None and "timestamp" in obj:
-            result["session_start"] = obj["timestamp"]
         _update_turn_state(obj, result)
         _update_usage_metrics(obj, result, context_limit)
         _apply_compaction_state(obj, result, context_limit)

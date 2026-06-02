@@ -20,11 +20,14 @@ Real-time status bar for Claude Code. Single-file script.
 
 - Entry point: `claude-code-statusline/statusline.py`
 - Reads session JSON from stdin (provided by Claude Code's `statusLine` feature)
-- Parses the transcript JSONL file for token usage, compaction events, tool calls, errors, turns, cache ratio, and thinking blocks
+- Context size, used tokens, session cost, duration, and rate-limit usage are read directly from the stdin JSON (`context_window.*`, `cost.*`, `rate_limits.*`) — not recomputed
+- Parses the transcript JSONL file only for what stdin does not provide: compaction events, tool calls, errors, turns, cache ratio, thinking blocks, and context history/growth
 - Three modes: `full` (3-line), `compact` (1-line), `custom` (configurable). Switch via `claudetui mode`
 - Custom config: `~/.claude/claudeui.json` under `"custom"` key, with `is_visible(line, component)` helper
 - Pluggable widget system (3x7 grid): `matrix`, `hex`, `bars`, `progress`, `none`
-- Context window: auto-detected from model ID (`claude-opus-4` → 1M, others → 200k)
+- Context window size: read from stdin `context_window.context_window_size`
+- Terminal width: read from the `COLUMNS` env var Claude Code sets (stdout is captured, so ioctl/tput cannot detect it)
+- Rate-limit usage (5h / 7d): read from stdin `rate_limits` (Pro/Max only); no OAuth call from the statusline
 - Compaction prediction: fixed 33k buffer model (`context_limit - COMPACT_BUFFER`), not percentage-based
 - Progress bar: smooth true-color RGB gradient (`_lerp_rgb`) across 5 color stops (green→teal→yellow→peach→pink); percentage color scales relative to compaction ceiling
 

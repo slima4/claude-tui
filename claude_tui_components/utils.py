@@ -2,8 +2,6 @@
 
 import os
 import re
-import shutil
-import subprocess
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -44,31 +42,16 @@ def format_tokens(n):
 
 
 def get_terminal_cols():
-    """Get terminal width, fallback to 80."""
-    import fcntl, struct, termios
+    """Get terminal width from the COLUMNS env var Claude Code sets.
+
+    Claude Code captures the status line's stdout, so tput/ioctl/shutil
+    width detection from inside the script cannot see the real terminal.
+    Claude Code exports COLUMNS (and LINES) to the script instead.
+    """
     try:
-        pid = os.getpid()
-        for _ in range(10):
-            result = subprocess.run(
-                ["ps", "-p", str(pid), "-o", "ppid=,tty="], capture_output=True, text=True, timeout=1
-            )
-            parts = result.stdout.split()
-            if len(parts) < 2:
-                break
-            ppid, tty = parts[0], parts[1]
-            if tty not in ("??", "?", ""):
-                fd = os.open(f"/dev/{tty}", os.O_RDONLY)
-                try:
-                    res = fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\x00" * 8)
-                    return struct.unpack("HHHH", res)[1]
-                finally:
-                    os.close(fd)
-            pid = int(ppid)
-            if pid <= 1:
-                break
-    except Exception:
+        cols = int(os.environ.get("COLUMNS", ""))
+        if cols > 0:
+            return cols
+    except (TypeError, ValueError):
         pass
-    try:
-        return shutil.get_terminal_size().columns
-    except Exception:
-        return 80
+    return 80

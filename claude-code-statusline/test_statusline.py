@@ -28,11 +28,36 @@ class TestTranscriptParsing(unittest.TestCase):
             "workspace": {"current_dir": "/tmp/project"},
             "transcript_path": "/tmp/t.jsonl",
             "session_id": "abcdef123456",
+            "context_window": {
+                "total_input_tokens": 12345,
+                "context_window_size": 1_000_000,
+            },
+            "cost": {"total_cost_usd": 1.23, "total_duration_ms": 125000},
+            "rate_limits": {
+                "five_hour": {"used_percentage": 25, "resets_at": 4102444800},
+                "seven_day": {"used_percentage": 75, "resets_at": 4102444800},
+            },
         }
         parsed = transcript.parse_input_data(data)
         self.assertEqual(parsed["model"], "Sonnet")
         self.assertEqual(parsed["cwd"], "project")
         self.assertEqual(parsed["session_id"], "abcdef12")
+        self.assertEqual(parsed["context_tokens"], 12345)
+        self.assertEqual(parsed["context_limit"], 1_000_000)
+        self.assertEqual(parsed["cost_usd"], 1.23)
+        self.assertEqual(parsed["duration_ms"], 125000)
+        self.assertEqual(parsed["usage"]["five_hour"]["utilization"], 25)
+        self.assertTrue(parsed["usage"]["five_hour"]["resets_at"])
+
+    def test_parse_input_data_defaults_when_fields_absent(self):
+        parsed = transcript.parse_input_data(
+            {"model": {"display_name": "Opus", "id": "claude-opus-4-8"}}
+        )
+        self.assertEqual(parsed["context_tokens"], 0)
+        self.assertEqual(parsed["context_limit"], DEFAULT_CONTEXT_LIMIT)
+        self.assertEqual(parsed["cost_usd"], 0.0)
+        self.assertEqual(parsed["duration_ms"], 0)
+        self.assertIsNone(parsed["usage"])
 
     def test_parse_transcript_metrics_and_tools(self):
         with tempfile.TemporaryDirectory() as td:
@@ -84,14 +109,6 @@ class TestTranscriptParsing(unittest.TestCase):
             self.assertIn("/tmp/a.py", m["files_touched"])
             self.assertEqual(m["subagent_count"], 1)
 
-    def test_context_limit_and_pricing_lookup(self):
-        self.assertEqual(transcript.get_context_limit("claude-opus-4-6"), 1_000_000)
-        self.assertEqual(
-            transcript.get_context_limit("unknown-model"), DEFAULT_CONTEXT_LIMIT
-        )
-        p = transcript.get_model_pricing("claude-sonnet-4-6")
-        self.assertIn("input", p)
-
     def test_compaction_prediction_and_efficiency(self):
         metrics = {
             "context_per_turn": [(1, 1000), (2, 1300), (3, 1700)],
@@ -113,7 +130,11 @@ class TestFormattingAndRender(unittest.TestCase):
         from claude_tui_components.utils import format_tokens
         self.assertEqual(format_tokens(1200), "1.2k")
         self.assertEqual(calculations.format_cost(0.001), "<$0.01")
-        self.assertEqual(calculations.format_duration(""), "0m")
+        self.assertEqual(calculations.format_duration_ms(0), "0m")
+        self.assertEqual(calculations.format_duration_ms(125000), "2m")
+        self.assertEqual(calculations.format_duration_ms(3_660_000), "1h 01m")
+        self.assertEqual(calculations.format_duration_ms(None), "0m")
+        self.assertEqual(calculations.format_duration_ms(-125000), "0m")
 
     def test_cache_ratio_and_part(self):
         metrics = {"input_tokens_total": 100, "cache_read_tokens_total": 100}
@@ -225,6 +246,11 @@ class TestEntrypointIntegration(unittest.TestCase):
             "workspace": {"current_dir": "/tmp/proj"},
             "transcript_path": transcript_path,
             "session_id": "abcdef123456",
+            "context_window": {
+                "total_input_tokens": 5000,
+                "context_window_size": 200_000,
+            },
+            "cost": {"total_cost_usd": 0.5, "total_duration_ms": 60000},
         }
 
     def _write_min_transcript(self):
@@ -261,7 +287,7 @@ class TestEntrypointIntegration(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(sys, "argv", ["statusline.py", "--compact"]), mock.patch(
             "sys.stdin", io.StringIO(json.dumps(payload))
-        ), mock.patch("statusline.fetch_usage", return_value=None), mock.patch(
+        ), mock.patch(
             "statusline.fetch_api_status", return_value=None
         ), mock.patch(
             "statusline.format_api_status", return_value=""
@@ -278,7 +304,7 @@ class TestEntrypointIntegration(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(sys, "argv", ["statusline.py"]), mock.patch(
             "sys.stdin", io.StringIO(json.dumps(payload))
-        ), mock.patch("statusline.fetch_usage", return_value=None), mock.patch(
+        ), mock.patch(
             "statusline.fetch_api_status", return_value=None
         ), mock.patch(
             "statusline.format_api_status", return_value=""

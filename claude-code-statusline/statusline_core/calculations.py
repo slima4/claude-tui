@@ -10,15 +10,11 @@ from .constants import (
     ORANGE,
     RED,
     RESET,
-    UTC_OFFSET,
     YELLOW,
 )
-from .debug import debug_log
 from .settings import is_visible
 
 from claude_tui_components.utils import format_tokens
-
-from datetime import datetime, timezone
 
 
 class ContextMetrics(TypedDict):
@@ -30,34 +26,21 @@ def format_cost(cost):
     return "<$0.01" if cost < 0.01 else f"${cost:.2f}"
 
 
-def format_duration(start_timestamp):
-    if not start_timestamp:
-        return "0m"
+def format_duration_ms(duration_ms):
+    """Format Claude Code's cost.total_duration_ms into a compact label."""
     try:
-        start = datetime.fromisoformat(start_timestamp.replace("Z", UTC_OFFSET))
-        now = datetime.now(timezone.utc)
-        total_minutes = int((now - start).total_seconds() / 60)
-        if total_minutes < 60:
-            return f"{total_minutes}m"
-        return f"{total_minutes // 60}h {total_minutes % 60:02d}m"
-    except Exception:
-        debug_log("format_duration parse failed")
-        return "?m"
+        total_minutes = max(0, int(duration_ms)) // 60000
+    except (TypeError, ValueError):
+        return "0m"
+    if total_minutes < 60:
+        return f"{total_minutes}m"
+    return f"{total_minutes // 60}h {total_minutes % 60:02d}m"
 
 
 def calculate_context_metrics(ctx_used: int, context_limit: int) -> ContextMetrics:
     ratio = ctx_used / context_limit if context_limit > 0 else 0
     compact_ratio = (context_limit - COMPACT_BUFFER) / context_limit if context_limit > 0 else 0.83
     return {"ratio": ratio, "compact_ratio": compact_ratio}
-
-
-def calculate_session_cost(metrics: dict, pricing: dict) -> float:
-    return (
-        metrics["input_tokens_total"] * pricing["input"] / 1_000_000
-        + metrics["cache_read_tokens_total"] * pricing["cache_read"] / 1_000_000
-        + metrics["cache_creation_tokens_total"] * pricing.get("cache_write", pricing["input"] * 1.25) / 1_000_000
-        + metrics["output_tokens_total"] * pricing["output"] / 1_000_000
-    )
 
 
 def calculate_cache_ratio(metrics: dict):

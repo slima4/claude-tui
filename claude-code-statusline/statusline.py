@@ -7,7 +7,6 @@ import sys
 
 from statusline_core.api_clients import (
     fetch_api_status,
-    fetch_usage,
     format_api_status,
 )
 from statusline_core.calculations import (
@@ -16,9 +15,8 @@ from statusline_core.calculations import (
     calculate_context_metrics,
     calculate_cost_per_turn,
     calculate_efficiency,
-    calculate_session_cost,
     format_cache_part,
-    format_duration,
+    format_duration_ms,
 )
 from statusline_core.display_state import DisplayState
 from statusline_core.git_info import format_git_branch, get_git_branch, get_git_diff_stat
@@ -34,8 +32,6 @@ from claude_tui_components.utils import get_terminal_cols
 from claude_tui_components.widgets import build_progress_bar, build_sparkline
 from statusline_core.settings import get_setting, is_visible
 from statusline_core.transcript import (
-    get_context_limit,
-    get_model_pricing,
     parse_input_data,
     parse_transcript,
 )
@@ -51,17 +47,19 @@ def main():
         return
 
     basic = parse_input_data(data)
-    model_id = basic["model_id"]
-    context_limit = get_context_limit(model_id)
+    # Context size, cost, duration, and rate-limit usage come straight from
+    # the JSON Claude Code pipes in. The transcript is parsed only for the
+    # analytics it doesn't expose (history, compaction, tool/turn counts).
+    context_limit = basic["context_limit"]
     metrics = parse_transcript(basic["transcript_path"], context_limit=context_limit)
 
-    ctx_used = metrics["context_tokens"]
+    ctx_used = basic["context_tokens"]
     ctx_metrics = calculate_context_metrics(ctx_used, context_limit)
     ratio = ctx_metrics["ratio"]
 
     term_cols_padded = get_terminal_cols() - get_setting("custom", "buffer", default=30)
     bar_length, spark_width = calculate_bar_widths(term_cols_padded)
-    cost = calculate_session_cost(metrics, get_model_pricing(model_id))
+    cost = basic["cost_usd"]
     cache_pct, cache_color = calculate_cache_ratio(metrics)
 
     branch_part = ""
@@ -69,9 +67,7 @@ def main():
     if branch:
         branch_part = format_git_branch(branch, get_git_diff_stat())
 
-    usage = None
-    if is_visible("line2", "usage") or is_visible("line3", "usage_weekly") or compact_mode:
-        usage = fetch_usage(background=False)
+    usage = basic["usage"]
 
     ds = DisplayState(
         model=basic["model"],
@@ -90,7 +86,7 @@ def main():
         ),
         sparkline_part=build_sparkline(metrics["context_history"], width=spark_width),
         cost_str=f"${cost:.2f}" if cost >= 0.01 else "<$0.01",
-        duration_str=format_duration(metrics["session_start"]),
+        duration_str=format_duration_ms(basic["duration_ms"]),
         efficiency_part=calculate_efficiency(metrics, ctx_used),
         branch_part=branch_part,
         cache_part=format_cache_part(cache_pct, cache_color),
