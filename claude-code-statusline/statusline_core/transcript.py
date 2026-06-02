@@ -16,6 +16,7 @@ class InputData(TypedDict):
     session_id: str
     context_tokens: int
     context_limit: int
+    used_percentage: float | None
     cost_usd: float
     duration_ms: int
     usage: dict | None
@@ -58,6 +59,9 @@ def parse_input_data(data: dict) -> InputData:
         # cache_read (output excluded), matching used_percentage's formula.
         "context_tokens": ctx.get("total_input_tokens") or 0,
         "context_limit": ctx.get("context_window_size") or DEFAULT_CONTEXT_LIMIT,
+        # Claude's own input-only percentage; None early in a session and
+        # right after /compact, so callers fall back to tokens/limit.
+        "used_percentage": ctx.get("used_percentage"),
         "cost_usd": cost.get("total_cost_usd") or 0.0,
         "duration_ms": cost.get("total_duration_ms") or 0,
         "usage": _build_usage_from_rate_limits(data.get("rate_limits", {})),

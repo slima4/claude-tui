@@ -229,13 +229,20 @@ mode = os.environ.get("STATUSLINE_MODE", "full")
 statusline_cmd = "claudetui statusline"
 if mode == "compact":
     statusline_cmd += " --compact"
-current_sl = settings.get("statusLine", {})
-if current_sl.get("command") != statusline_cmd:
-    # Also remove old absolute-path statusline commands
-    settings["statusLine"] = {
-        "type": "command",
-        "command": statusline_cmd,
-    }
+# Merge into any existing statusLine config so user-set keys (padding,
+# hideVimModeIndicator, a custom refreshInterval) survive reinstalls. Only the
+# keys we own get rewritten. refreshInterval re-runs the command on a timer so
+# duration, rate-limit reset countdowns, and git state stay fresh while the
+# session is idle (e.g. waiting on background subagents).
+sl = settings.get("statusLine")
+if not isinstance(sl, dict):
+    sl = {}
+before = dict(sl)
+sl["type"] = "command"
+sl["command"] = statusline_cmd
+sl.setdefault("refreshInterval", 10)
+if sl != before:
+    settings["statusLine"] = sl
     print(f"  \033[92m✓\033[0m Statusline configured ({mode})")
 else:
     print(f"  \033[92m✓\033[0m Statusline already configured ({mode})")

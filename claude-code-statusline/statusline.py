@@ -54,7 +54,9 @@ def main():
     metrics = parse_transcript(basic["transcript_path"], context_limit=context_limit)
 
     ctx_used = basic["context_tokens"]
-    ctx_metrics = calculate_context_metrics(ctx_used, context_limit)
+    ctx_metrics = calculate_context_metrics(
+        ctx_used, context_limit, basic["used_percentage"]
+    )
     ratio = ctx_metrics["ratio"]
 
     term_cols_padded = get_terminal_cols() - get_setting("custom", "buffer", default=30)

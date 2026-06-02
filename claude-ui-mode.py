@@ -170,7 +170,12 @@ def set_mode(mode):
         print(f"  {RED}\u2717{RESET} Unknown mode: {mode}")
         sys.exit(1)
 
-    settings["statusLine"] = {"type": "command", "command": cmd}
+    sl = settings.get("statusLine", {})
+    sl.update({"type": "command", "command": cmd})
+    # Backfill refreshInterval for installs predating it, without clobbering a
+    # value the user set themselves (keep in sync with install.sh default).
+    sl.setdefault("refreshInterval", 10)
+    settings["statusLine"] = sl
     save_settings(settings)
     print(f"  {GREEN}\u2713{RESET} Statusline mode: {BOLD}{CYAN}{mode}{RESET}")
     print(f"  {DIM}Restart Claude Code for changes to take effect.{RESET}")
@@ -752,7 +757,7 @@ def main():
         current_cmd = settings.get("statusLine", {}).get("command", "")
         if current_cmd and "--compact" in current_cmd:
             base_cmd = current_cmd.replace(" --compact", "").strip()
-            settings["statusLine"] = {"type": "command", "command": base_cmd}
+            settings["statusLine"]["command"] = base_cmd
             save_settings(settings)
             print(f"  {DIM}Removed compact flag for custom mode{RESET}")
         cmd_custom(args[1:])

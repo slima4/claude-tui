@@ -37,8 +37,17 @@ def format_duration_ms(duration_ms):
     return f"{total_minutes // 60}h {total_minutes % 60:02d}m"
 
 
-def calculate_context_metrics(ctx_used: int, context_limit: int) -> ContextMetrics:
-    ratio = ctx_used / context_limit if context_limit > 0 else 0
+def calculate_context_metrics(
+    ctx_used: int, context_limit: int, used_percentage: float | None = None
+) -> ContextMetrics:
+    # Prefer Claude's pre-calculated input-only percentage so the bar matches
+    # /context; fall back to tokens/limit when it's absent (early session).
+    if used_percentage is not None:
+        ratio = used_percentage / 100
+    elif context_limit > 0:
+        ratio = ctx_used / context_limit
+    else:
+        ratio = 0
     compact_ratio = (context_limit - COMPACT_BUFFER) / context_limit if context_limit > 0 else 0.83
     return {"ratio": ratio, "compact_ratio": compact_ratio}
 

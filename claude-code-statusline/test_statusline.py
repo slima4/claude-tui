@@ -31,6 +31,7 @@ class TestTranscriptParsing(unittest.TestCase):
             "context_window": {
                 "total_input_tokens": 12345,
                 "context_window_size": 1_000_000,
+                "used_percentage": 42.5,
             },
             "cost": {"total_cost_usd": 1.23, "total_duration_ms": 125000},
             "rate_limits": {
@@ -44,6 +45,7 @@ class TestTranscriptParsing(unittest.TestCase):
         self.assertEqual(parsed["session_id"], "abcdef12")
         self.assertEqual(parsed["context_tokens"], 12345)
         self.assertEqual(parsed["context_limit"], 1_000_000)
+        self.assertEqual(parsed["used_percentage"], 42.5)
         self.assertEqual(parsed["cost_usd"], 1.23)
         self.assertEqual(parsed["duration_ms"], 125000)
         self.assertEqual(parsed["usage"]["five_hour"]["utilization"], 25)
@@ -55,6 +57,7 @@ class TestTranscriptParsing(unittest.TestCase):
         )
         self.assertEqual(parsed["context_tokens"], 0)
         self.assertEqual(parsed["context_limit"], DEFAULT_CONTEXT_LIMIT)
+        self.assertIsNone(parsed["used_percentage"])
         self.assertEqual(parsed["cost_usd"], 0.0)
         self.assertEqual(parsed["duration_ms"], 0)
         self.assertIsNone(parsed["usage"])
@@ -123,6 +126,14 @@ class TestTranscriptParsing(unittest.TestCase):
         with mock.patch("statusline_core.calculations.is_visible", return_value=True):
             eff = calculations.calculate_efficiency(metrics, 2000)
         self.assertIn("eff", eff)
+
+    def test_context_metrics_prefers_stdin_percentage(self):
+        # stdin used_percentage wins over tokens/limit when present
+        m = calculations.calculate_context_metrics(999, 200_000, used_percentage=42.5)
+        self.assertAlmostEqual(m["ratio"], 0.425)
+        # falls back to tokens/limit when absent
+        m2 = calculations.calculate_context_metrics(50_000, 200_000)
+        self.assertAlmostEqual(m2["ratio"], 0.25)
 
 
 class TestFormattingAndRender(unittest.TestCase):

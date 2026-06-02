@@ -26,7 +26,9 @@ Real-time status bar for Claude Code. Single-file script.
 - Custom config: `~/.claude/claudeui.json` under `"custom"` key, with `is_visible(line, component)` helper
 - Pluggable widget system (3x7 grid): `matrix`, `hex`, `bars`, `progress`, `none`
 - Context window size: read from stdin `context_window.context_window_size`
+- Context fill ratio: uses stdin `context_window.used_percentage` (Claude's input-only figure, matches `/context`); falls back to `tokens / limit` when it's null (early session, post-compact)
 - Terminal width: read from the `COLUMNS` env var Claude Code sets (stdout is captured, so ioctl/tput cannot detect it)
+- `install.sh` sets `refreshInterval` on the `statusLine` config so duration, rate-limit reset countdowns, and git state stay fresh while the session is idle
 - Rate-limit usage (5h / 7d): read from stdin `rate_limits` (Pro/Max only); no OAuth call from the statusline
 - Compaction prediction: fixed 33k buffer model (`context_limit - COMPACT_BUFFER`), not percentage-based
 - Progress bar: smooth true-color RGB gradient (`_lerp_rgb`) across 5 color stops (green→teal→yellow→peach→pink); percentage color scales relative to compaction ceiling
