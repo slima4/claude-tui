@@ -22,6 +22,11 @@ SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 COMMANDS_DIR="$CLAUDE_DIR/commands"
 BIN_DIR="$HOME/.local/bin"
 
+# Interpreter used for the version check AND baked into the claudetui wrapper.
+# Override to pin an isolated Python (e.g. a uv-managed 3.13) without touching
+# the system python3:  CLAUDETUI_PYTHON="$(uv python find 3.13)" ./install.sh
+PYTHON_BIN="${CLAUDETUI_PYTHON:-python3}"
+
 # Colors
 RED='\033[91m'
 GREEN='\033[92m'
@@ -69,17 +74,26 @@ print_header
 step "Checking requirements..."
 
 # Python 3.13+
-if ! command -v python3 &>/dev/null; then
-    fail "python3 not found. Install Python 3.13+ first."
+if ! command -v "$PYTHON_BIN" &>/dev/null; then
+    fail "$PYTHON_BIN not found. Install Python 3.13+ first."
 fi
+PYTHON_ABS="$(command -v "$PYTHON_BIN")"
 
-PY_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+PY_VERSION=$("$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
 PY_MAJOR=$(echo "$PY_VERSION" | cut -d. -f1)
 PY_MINOR=$(echo "$PY_VERSION" | cut -d. -f2)
 if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 13 ]; }; then
+    # Offer an isolated interpreter if uv is around, so the system python3 (too
+    # old) doesn't have to be touched.
+    if command -v uv &>/dev/null; then
+        warn "Python 3.13+ required, found $PY_VERSION"
+        echo -e "  ${DIM}Tip: install an isolated 3.13 and re-run pinned to it:${RESET}"
+        echo -e "  ${DIM}uv python install 3.13${RESET}"
+        echo -e "  ${DIM}CLAUDETUI_PYTHON=\"\$(uv python find 3.13)\" ./install.sh${RESET}"
+    fi
     fail "Python 3.13+ required, found $PY_VERSION"
 fi
-ok "Python $PY_VERSION"
+ok "Python $PY_VERSION ($PYTHON_ABS)"
 
 # Git
 if ! command -v git &>/dev/null; then
@@ -201,7 +215,7 @@ echo ""
 step "Configuring Claude Code settings..."
 
 # Use Python to safely merge into settings.json
-python3 << 'PYEOF'
+"$PYTHON_BIN" << 'PYEOF'
 import json
 import os
 import sys
@@ -330,7 +344,7 @@ mkdir -p "$BIN_DIR"
 # Primary CLI command
 cat > "$BIN_DIR/claudetui" << EOF
 #!/usr/bin/env bash
-exec python3 "$INSTALL_DIR/claudetui.py" "\$@"
+exec "$PYTHON_ABS" "$INSTALL_DIR/claudetui.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/claudetui"
 ok "claudetui"
@@ -398,5 +412,5 @@ echo ""
 if [ "$LAUNCH_CUSTOM" = "true" ]; then
     echo -e "  ${BOLD}Opening statusline configurator...${RESET}"
     echo ""
-    python3 "$INSTALL_DIR/claude-ui-mode.py" custom
+    "$PYTHON_BIN" "$INSTALL_DIR/claude-ui-mode.py" custom
 fi
