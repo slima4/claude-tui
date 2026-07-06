@@ -3,21 +3,62 @@ Single source of truth for all Anthropic model domain data.
 Owns: MODEL_PRICING, MODEL_CONTEXT_WINDOW, COMPACT_BUFFER, get_context_limit(), get_model_pricing()
 """
 
-# Context window sizes by model family
+# Context window sizes by model family.
+# Substring-matched against the model ID (first match wins), so order the more
+# specific keys before broader ones. Models absent here fall back to
+# DEFAULT_CONTEXT_LIMIT (200k) — that covers Haiku and older/legacy Sonnet.
 MODEL_CONTEXT_WINDOW = {
-    "claude-opus-4": 1_000_000,
+    "claude-opus-4": 1_000_000,   # Opus 4.5–4.8
+    "claude-fable-5": 1_000_000,
+    "claude-sonnet-5": 1_000_000,
+    "claude-mythos": 1_000_000,   # Mythos preview / Mythos 5
 }
 DEFAULT_CONTEXT_LIMIT = 200_000
 COMPACT_BUFFER = 33_000
 
-# Pricing per million tokens (input, cache_read, cache_write, output)
-# Note: cache_write is typically 1.25x input price
+# Pricing per million tokens (input, cache_read, cache_write, output).
+# Convention: cache_read = 0.1x input, cache_write (5-min) = 1.25x input.
+# Keys are substring-matched against the model ID (get_model_pricing); each key
+# is a full, distinct model ID so match order is unambiguous.
+# Note: Sonnet 5 has an introductory rate ($2/$10 through 2026-08-31); the
+# durable standard rate ($3/$15) is used here so the figure stays correct after
+# the intro window closes.
 MODEL_PRICING = {
+    "claude-fable-5": {
+        "input": 10.0,
+        "cache_read": 1.0,
+        "cache_write": 12.5,
+        "output": 50.0,
+    },
+    "claude-mythos": {   # Mythos preview / Mythos 5 — Fable-tier pricing
+        "input": 10.0,
+        "cache_read": 1.0,
+        "cache_write": 12.5,
+        "output": 50.0,
+    },
+    "claude-opus-4-8": {
+        "input": 5.0,
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "output": 25.0,
+    },
+    "claude-opus-4-7": {
+        "input": 5.0,
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "output": 25.0,
+    },
     "claude-opus-4-6": {
-        "input": 15.0,
-        "cache_read": 1.5,
-        "cache_write": 18.75,
-        "output": 75.0,
+        "input": 5.0,
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "output": 25.0,
+    },
+    "claude-sonnet-5": {
+        "input": 3.0,
+        "cache_read": 0.30,
+        "cache_write": 3.75,
+        "output": 15.0,
     },
     "claude-sonnet-4-6": {
         "input": 3.0,
@@ -26,10 +67,10 @@ MODEL_PRICING = {
         "output": 15.0,
     },
     "claude-haiku-4-5": {
-        "input": 0.80,
-        "cache_read": 0.08,
-        "cache_write": 1.0,
-        "output": 4.0,
+        "input": 1.0,
+        "cache_read": 0.10,
+        "cache_write": 1.25,
+        "output": 5.0,
     },
     "claude-sonnet-3-5": {
         "input": 3.0,

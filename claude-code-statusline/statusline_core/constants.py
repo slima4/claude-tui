@@ -11,6 +11,7 @@ from claude_tui_core.models import (
     DEFAULT_CONTEXT_LIMIT,
     COMPACT_BUFFER,
     MODEL_PRICING,
+    get_context_limit,
 )
 
 # ANSI colors

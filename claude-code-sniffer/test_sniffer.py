@@ -52,7 +52,7 @@ class TestFormatBytes(unittest.TestCase):
 class TestMatchPricing(unittest.TestCase):
     def test_opus(self):
         p = _match_pricing("claude-opus-4-6-20260301")
-        self.assertEqual(p["input"], 15.0)
+        self.assertEqual(p["input"], 5.0)
 
     def test_sonnet(self):
         p = _match_pricing("claude-sonnet-4-6")
@@ -60,7 +60,17 @@ class TestMatchPricing(unittest.TestCase):
 
     def test_haiku(self):
         p = _match_pricing("claude-haiku-4-5-20251001")
-        self.assertEqual(p["input"], 0.80)
+        self.assertEqual(p["input"], 1.0)
+
+    def test_fable(self):
+        p = _match_pricing("claude-fable-5")
+        self.assertEqual(p["input"], 10.0)
+        self.assertEqual(p["output"], 50.0)
+
+    def test_opus_4_8(self):
+        p = _match_pricing("claude-opus-4-8")
+        self.assertEqual(p["input"], 5.0)
+        self.assertEqual(p["output"], 25.0)
 
     def test_unknown_defaults_to_sonnet(self):
         p = _match_pricing("unknown-model")
@@ -91,8 +101,8 @@ class TestCalcCost(unittest.TestCase):
             "output_tokens": 0,
         }
         cost = _calc_cost(usage, "claude-opus-4-6")
-        # 100k * 1.5/1M = 0.15
-        self.assertAlmostEqual(cost, 0.15, places=5)
+        # 100k * 0.5/1M = 0.05
+        self.assertAlmostEqual(cost, 0.05, places=5)
 
     def test_empty_usage(self):
         self.assertEqual(_calc_cost({}, "claude-opus-4-6"), 0.0)

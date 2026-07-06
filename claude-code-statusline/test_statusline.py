@@ -52,15 +52,22 @@ class TestTranscriptParsing(unittest.TestCase):
         self.assertTrue(parsed["usage"]["five_hour"]["resets_at"])
 
     def test_parse_input_data_defaults_when_fields_absent(self):
-        parsed = transcript.parse_input_data(
-            {"model": {"display_name": "Opus", "id": "claude-opus-4-8"}}
-        )
+        # No context_window_size and no resolvable model id -> flat default.
+        parsed = transcript.parse_input_data({"model": {"display_name": "Unknown"}})
         self.assertEqual(parsed["context_tokens"], 0)
         self.assertEqual(parsed["context_limit"], DEFAULT_CONTEXT_LIMIT)
         self.assertIsNone(parsed["used_percentage"])
         self.assertEqual(parsed["cost_usd"], 0.0)
         self.assertEqual(parsed["duration_ms"], 0)
         self.assertIsNone(parsed["usage"])
+
+    def test_parse_input_data_context_limit_falls_back_to_model(self):
+        # When Claude Code omits context_window_size, resolve the window from the
+        # model id so 1M models don't collapse to the 200k default (issue #12).
+        parsed = transcript.parse_input_data(
+            {"model": {"display_name": "Claude Fable 5", "id": "claude-fable-5"}}
+        )
+        self.assertEqual(parsed["context_limit"], 1_000_000)
 
     def test_parse_transcript_metrics_and_tools(self):
         with tempfile.TemporaryDirectory() as td:

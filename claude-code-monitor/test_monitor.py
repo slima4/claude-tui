@@ -602,6 +602,17 @@ class TestConstants(unittest.TestCase):
     def test_get_context_limit_opus(self):
         self.assertEqual(get_context_limit("claude-opus-4-6"), 1_000_000)
         self.assertEqual(get_context_limit("claude-opus-4-6-20260301"), 1_000_000)
+        self.assertEqual(get_context_limit("claude-opus-4-8"), 1_000_000)
+
+    def test_get_context_limit_fable(self):
+        self.assertEqual(get_context_limit("claude-fable-5"), 1_000_000)
+
+    def test_get_context_limit_sonnet5(self):
+        self.assertEqual(get_context_limit("claude-sonnet-5"), 1_000_000)
+
+    def test_get_context_limit_mythos(self):
+        self.assertEqual(get_context_limit("claude-mythos-5"), 1_000_000)
+        self.assertEqual(get_context_limit("claude-mythos-preview"), 1_000_000)
 
     def test_get_context_limit_sonnet(self):
         self.assertEqual(get_context_limit("claude-sonnet-4-6"), 200_000)

@@ -5,7 +5,7 @@ import os
 from datetime import datetime, timezone
 from typing import TypedDict
 
-from .constants import DEFAULT_CONTEXT_LIMIT
+from .constants import DEFAULT_CONTEXT_LIMIT, get_context_limit
 from .debug import debug_log
 
 
@@ -50,15 +50,19 @@ def _build_usage_from_rate_limits(rate_limits: dict) -> dict | None:
 def parse_input_data(data: dict) -> InputData:
     ctx = data.get("context_window", {}) or {}
     cost = data.get("cost", {}) or {}
+    model = data.get("model", {}) or {}
     return {
-        "model": data.get("model", {}).get("display_name", "unknown"),
+        "model": model.get("display_name", "unknown"),
         "cwd": os.path.basename(data.get("workspace", {}).get("current_dir", "")),
         "transcript_path": data.get("transcript_path", ""),
         "session_id": data.get("session_id", "")[:8],
         # context_window.total_input_tokens already = input + cache_creation +
         # cache_read (output excluded), matching used_percentage's formula.
         "context_tokens": ctx.get("total_input_tokens") or 0,
-        "context_limit": ctx.get("context_window_size") or DEFAULT_CONTEXT_LIMIT,
+        # Prefer Claude Code's own window size; when it's absent (early session,
+        # or a model this Claude Code build doesn't report a size for) resolve
+        # from the model ID so 1M models don't fall back to the 200k default.
+        "context_limit": ctx.get("context_window_size") or get_context_limit(model.get("id", "")),
         # Claude's own input-only percentage; None early in a session and
         # right after /compact, so callers fall back to tokens/limit.
         "used_percentage": ctx.get("used_percentage"),
