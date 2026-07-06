@@ -9,6 +9,11 @@ SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 COMMANDS_DIR="$CLAUDE_DIR/commands"
 BIN_DIR="$HOME/.local/bin"
 
+# Same override as install.sh; only used to rewrite settings.json here, so fall
+# back to system python3 if the pinned interpreter is already gone.
+PYTHON_BIN="${CLAUDETUI_PYTHON:-python3}"
+command -v "$PYTHON_BIN" &>/dev/null || PYTHON_BIN=python3
+
 RED='\033[91m'
 GREEN='\033[92m'
 YELLOW='\033[93m'
@@ -46,7 +51,7 @@ done
 
 # Clean settings.json
 if [ -f "$SETTINGS_FILE" ]; then
-    python3 << 'PYEOF'
+    "$PYTHON_BIN" << 'PYEOF'
 import json
 import os
 

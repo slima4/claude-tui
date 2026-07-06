@@ -67,6 +67,16 @@ ClaudeTUI requires a Unix-like environment. On Windows, use [WSL 2](https://lear
 curl -sSL https://raw.githubusercontent.com/slima4/claude-tui/main/install.sh | bash
 ```
 
+### Install options
+
+Both `install.sh` and `uninstall.sh` honor a few environment variables:
+
+```bash
+CLAUDETUI_PYTHON="$(uv python find 3.13)" ./install.sh   # pin an isolated Python (e.g. uv-managed 3.13); baked into the claudetui wrapper
+INSTALL_DIR="$HOME/tools/claude-tui" ./install.sh        # install somewhere other than ~/.claude-ui
+CLAUDE_UI_HOME="$HOME/tools/claude-tui" ./install.sh      # alias for INSTALL_DIR
+```
+
 ### Uninstall
 
 ```bash
