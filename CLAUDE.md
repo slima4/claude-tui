@@ -65,7 +65,7 @@ Live session dashboard for a separate terminal.
 - Entry point: `claude-code-monitor/monitor.py`
 - Shared library: `claude-code-monitor/lib.py` (transcript parsing, formatting, constants, pricing)
 - Chart module: `claude-code-monitor/chart.py` (efficiency chart rendering and segment building)
-- Tests: `claude-code-monitor/test_monitor.py` (run with `python3 -v`)
+- Tests: `claude-code-monitor/test_monitor.py` (see Testing section for how to run)
 - Watches transcript file for changes, refreshes on file change
 - Args: none (auto-detect), `<session-id>`, `--list`, or `--chart [session-id]`
 - Hotkeys: `s` stats, `d` details, `l` log viewer, `w` efficiency chart, `e` export, `o` sessions, `c` config, `i` Claude status, `?` help
@@ -123,9 +123,13 @@ Claude Code hooks for automatic in-session context. Three hook scripts:
 
 ## Testing
 
+Run from the repo root with `PYTHONPATH=.` so the suites can import the shared
+`claude_tui_core` / `claude_tui_components` packages:
+
 ```bash
-python3 claude-code-monitor/test_monitor.py -v   # monitor: parsing, waste model, chart
-python3 claude-code-sniffer/test_sniffer.py -v   # sniffer: formatters, SSE, session tracker, compaction
+PYTHONPATH=. python3 claude-code-monitor/test_monitor.py -v      # monitor: parsing, waste model, chart
+PYTHONPATH=. python3 claude-code-sniffer/test_sniffer.py -v      # sniffer: formatters, SSE, session tracker, compaction
+PYTHONPATH=. python3 claude-code-statusline/test_statusline.py -v # statusline: input parsing, rendering, context limits
 ```
 
 Quick syntax check for all tools:
