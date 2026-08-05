@@ -6,9 +6,14 @@ Owns: MODEL_PRICING, MODEL_CONTEXT_WINDOW, COMPACT_BUFFER, get_context_limit(), 
 # Context window sizes by model family.
 # Substring-matched against the model ID (first match wins), so order the more
 # specific keys before broader ones. Models absent here fall back to
-# DEFAULT_CONTEXT_LIMIT (200k) — that covers Haiku and older/legacy Sonnet.
+# DEFAULT_CONTEXT_LIMIT (200k) — that covers Haiku, older/legacy Sonnet, and
+# the 200k Opus releases (4.5 and earlier). The 1M window starts at Opus 4.6,
+# so this cannot be collapsed to a "claude-opus-4" prefix.
 MODEL_CONTEXT_WINDOW = {
-    "claude-opus-4": 1_000_000,   # Opus 4.5–4.8
+    "claude-opus-5": 1_000_000,
+    "claude-opus-4-8": 1_000_000,
+    "claude-opus-4-7": 1_000_000,
+    "claude-opus-4-6": 1_000_000,
     "claude-fable-5": 1_000_000,
     "claude-sonnet-5": 1_000_000,
     "claude-mythos": 1_000_000,   # Mythos preview / Mythos 5
@@ -36,6 +41,12 @@ MODEL_PRICING = {
         "cache_write": 12.5,
         "output": 50.0,
     },
+    "claude-opus-5": {
+        "input": 5.0,
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "output": 25.0,
+    },
     "claude-opus-4-8": {
         "input": 5.0,
         "cache_read": 0.5,
@@ -49,6 +60,12 @@ MODEL_PRICING = {
         "output": 25.0,
     },
     "claude-opus-4-6": {
+        "input": 5.0,
+        "cache_read": 0.5,
+        "cache_write": 6.25,
+        "output": 25.0,
+    },
+    "claude-opus-4-5": {   # 200k window, but Opus-tier pricing
         "input": 5.0,
         "cache_read": 0.5,
         "cache_write": 6.25,
@@ -91,6 +108,8 @@ DEFAULT_MODEL_PRICING_KEY = "claude-sonnet-4-6"
 # Deterministic aliases for abbreviated model keys used by sniffer logs.
 # Keys are normalized (lowercase alnum only).
 FUZZY_PRICING_ALIASES = {
+    "claudeopus5": "claude-opus-5",
+    "opus5": "claude-opus-5",
     "claudeopus46": "claude-opus-4-6",
     "claudeopus4": "claude-opus-4-6",
     "opus46": "claude-opus-4-6",
