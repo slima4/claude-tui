@@ -1,806 +1,532 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ClaudeTUI — Real-time dashboard for Claude Code</title>
-  <meta name="description" content="Statusline, live monitor, session analytics, hooks, and slash commands for Claude Code.">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ClaudeTUI — instrumentation for Claude Code sessions</title>
+<meta name="description" content="Statusline, live monitor, API sniffer, and session analytics for Claude Code. Context, cost, cache ratio, and tool activity read straight from the transcript. Python 3.13+, stdlib only.">
+<link rel="canonical" href="https://slima4.github.io/claude-tui/">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#11111b">
 
-  <!-- Favicon -->
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='4' fill='%230a0e14'/><text x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%2300ff41' text-anchor='middle'>UI</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%2311111b'/><rect x='6' y='20' width='4' height='6' fill='%23a6e3a1'/><rect x='12' y='14' width='4' height='12' fill='%2394e2d5'/><rect x='18' y='9' width='4' height='17' fill='%23f9e2af'/><rect x='24' y='16' width='2' height='10' fill='%23fab387'/></svg>">
 
-  <!-- Open Graph -->
-  <meta property="og:title" content="ClaudeTUI — Real-time dashboard for Claude Code">
-  <meta property="og:description" content="Statusline, live monitor, session analytics, hooks, and slash commands for Claude Code.">
-  <meta property="og:image" content="https://raw.githubusercontent.com/slima4/claude-tui/main/assets/social-card.png">
-  <meta property="og:url" content="https://slima4.github.io/claude-tui/">
-  <meta property="og:type" content="website">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://slima4.github.io/claude-tui/">
+<meta property="og:title" content="ClaudeTUI — instrumentation for Claude Code sessions">
+<meta property="og:description" content="Statusline, live monitor, API sniffer, and session analytics for Claude Code. Python 3.13+, stdlib only.">
+<meta property="og:image" content="https://raw.githubusercontent.com/slima4/claude-tui/main/assets/social-card.png">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="ClaudeTUI — instrumentation for Claude Code sessions">
+<meta name="twitter:description" content="Statusline, live monitor, API sniffer, and session analytics for Claude Code. Python 3.13+, stdlib only.">
+<meta name="twitter:image" content="https://raw.githubusercontent.com/slima4/claude-tui/main/assets/social-card.png">
 
-  <!-- Twitter Card -->
-  <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="ClaudeTUI — Real-time dashboard for Claude Code">
-  <meta name="twitter:description" content="Statusline, live monitor, session analytics, hooks, and slash commands for Claude Code.">
-  <meta name="twitter:image" content="https://raw.githubusercontent.com/slima4/claude-tui/main/assets/social-card.png">
+<style>
+/* Palette is the tool's own: the RGB stops claude_tui_components/widgets.py
+   renders progress bars and sparklines with. The page and the terminal output
+   it shows are literally the same colours. */
+:root {
+  --crust:#11111b; --base:#181825; --panel:#1e1e2e; --surface:#313244;
+  --line:#282838; --overlay:#6c7086;
+  --text:#cdd6f4; --subtext:#a6adc8;
+  --green:#a6e3a1; --teal:#94e2d5; --yellow:#f9e2af; --peach:#fab387; --pink:#f38ba8; --mauve:#cba6f7;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  --col: 1120px;
+}
 
-  <style>
-    :root {
-      --bg: #0a0e14;
-      --bg-card: #111820;
-      --bg-card-hover: #161e28;
-      --border: #1e2a3a;
-      --text: #c5cdd8;
-      --text-dim: #6b7a8d;
-      --text-bright: #e8edf3;
-      --green: #00ff41;
-      --green-dim: #03a062;
-      --green-dark: #003b00;
-      --cyan: #56d4dd;
-      --yellow: #f0c040;
-      --orange: #e89040;
-      --red: #f04040;
-      --magenta: #c678dd;
-      --blue: #61afef;
-      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
-      --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', sans-serif;
-    }
+*,*::before,*::after { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; }
+body {
+  margin:0; background:var(--crust); color:var(--text);
+  font-family:var(--mono); font-size:15px; line-height:1.65;
+  font-variant-numeric:tabular-nums;
+}
+@media (prefers-reduced-motion:reduce) {
+  *,*::before,*::after { animation-duration:.01ms !important; transition-duration:.01ms !important; scroll-behavior:auto !important; }
+}
+html { scroll-behavior:smooth; }
 
-    * { margin: 0; padding: 0; box-sizing: border-box; }
+a { color:var(--teal); text-underline-offset:3px; text-decoration-thickness:1px; }
+a:hover { color:var(--green); }
+:focus-visible { outline:2px solid var(--teal); outline-offset:2px; border-radius:2px; }
 
-    html { scroll-behavior: smooth; }
+.wrap { max-width:var(--col); margin:0 auto; padding:0 20px; }
 
-    body {
-      font-family: var(--sans);
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
-      overflow-x: hidden;
-    }
+.skip {
+  position:absolute; left:-9999px; top:0; z-index:20;
+  background:var(--panel); color:var(--text); padding:10px 16px; border:1px solid var(--teal);
+}
+.skip:focus { left:12px; top:12px; }
 
-    /* ── Scanline overlay ── */
-    body::after {
-      content: '';
-      position: fixed;
-      top: 0; left: 0; right: 0; bottom: 0;
-      pointer-events: none;
-      background: repeating-linear-gradient(
-        0deg,
-        transparent,
-        transparent 2px,
-        rgba(0, 255, 65, 0.015) 2px,
-        rgba(0, 255, 65, 0.015) 4px
-      );
-      z-index: 9999;
-    }
+/* ── Top bar ───────────────────────────────────────────── */
+.bar {
+  position:sticky; top:0; z-index:10;
+  background:color-mix(in srgb, var(--crust) 88%, transparent);
+  backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--line);
+}
+.bar .wrap { display:flex; align-items:center; gap:20px; height:48px; }
+.brand { font-weight:700; color:var(--text); text-decoration:none; letter-spacing:-.2px; white-space:nowrap; }
+.brand b { color:var(--green); font-weight:700; }
+.ver { color:var(--overlay); font-size:12px; }
+.bar nav { margin-left:auto; display:flex; gap:18px; font-size:13px; overflow-x:auto; }
+.bar nav a { color:var(--subtext); text-decoration:none; white-space:nowrap; }
+.bar nav a:hover { color:var(--green); }
+@media (max-width:800px) { .bar nav a.opt { display:none; } }
 
-    a { color: var(--cyan); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+/* ── Masthead ──────────────────────────────────────────── */
+.masthead { padding:56px 0 40px; display:grid; grid-template-columns:minmax(0,1.35fr) minmax(0,1fr); gap:48px; align-items:start; }
+@media (max-width:820px) { .masthead { grid-template-columns:minmax(0,1fr); gap:32px; padding:36px 0 28px; } }
 
-    .container {
-      max-width: 960px;
-      margin: 0 auto;
-      padding: 0 24px;
-    }
+/* ASCII wordmark — assets/logo.svg as live text, recoloured to this page's
+   palette. Sized so all 70 columns fit the masthead's left track at every
+   breakpoint; overflow-x is the safety net if a font's advance width differs. */
+.wordmark { margin:0 0 26px; font-family:var(--mono); font-weight:700; font-size:clamp(6px,1.15vw,12px);
+            line-height:1.15; white-space:pre; color:var(--text); overflow-x:auto; scrollbar-width:none; }
+.wordmark .ui { color:var(--green); }
+/* single-column masthead — the whole wrap width is available */
+@media (max-width:820px) { .wordmark { font-size:clamp(6px,1.9vw,12px); margin-bottom:22px; } }
+@media (max-width:360px) { .wordmark { font-size:6px; } }
 
-    /* ── Hero ── */
-    .hero {
-      padding: 80px 0 60px;
-      text-align: center;
-    }
+h1 { font-size:clamp(30px,5.2vw,44px); line-height:1.1; margin:0 0 14px; letter-spacing:-1.2px; font-weight:700; }
+h1 b { color:var(--green); font-weight:700; }
+.lede { color:var(--subtext); margin:0 0 8px; max-width:52ch; }
+.lede.tight { color:var(--overlay); font-size:14px; }
 
-    .hero-badge {
-      display: inline-block;
-      font-family: var(--mono);
-      font-size: 11px;
-      letter-spacing: 2px;
-      text-transform: uppercase;
-      color: var(--green);
-      border: 1px solid var(--green-dim);
-      padding: 4px 14px;
-      border-radius: 3px;
-      margin-bottom: 24px;
-    }
+/* spec table — the datasheet block opposite the title */
+.spec { border:1px solid var(--line); background:var(--base); }
+.spec div { display:flex; gap:16px; padding:8px 14px; font-size:13px; border-bottom:1px solid var(--line); }
+.spec div:last-child { border-bottom:0; }
+.spec dt { color:var(--overlay); width:9.5em; flex:none; margin:0; }
+.spec dd { margin:0; color:var(--text); min-width:0; overflow-wrap:anywhere; }
+.spec dd a { text-decoration:none; }
+@media (max-width:420px) { .spec dt { width:7.5em; } .spec div { gap:10px; padding:8px 10px; } }
 
-    .hero h1 {
-      font-family: var(--mono);
-      font-size: clamp(36px, 6vw, 56px);
-      font-weight: 700;
-      color: var(--text-bright);
-      margin-bottom: 16px;
-      letter-spacing: -1px;
-    }
+/* ── Install ───────────────────────────────────────────── */
+.install { border:1px solid var(--line); background:var(--base); margin:0 0 8px; }
+.install-row { display:flex; align-items:center; gap:12px; padding:12px 14px; border-bottom:1px solid var(--line); }
+.install-row:last-child { border-bottom:0; }
+.install .sh { color:var(--overlay); user-select:none; flex:none; }
+.install code { flex:1; min-width:0; overflow-x:auto; white-space:pre; font:inherit; color:var(--text); scrollbar-width:thin; }
+.copy {
+  flex:none; font:inherit; font-size:12px; cursor:pointer;
+  background:transparent; color:var(--subtext);
+  border:1px solid var(--surface); border-radius:2px; padding:2px 10px;
+}
+.copy:hover { color:var(--green); border-color:var(--green); }
+.copy[data-state="ok"] { color:var(--green); border-color:var(--green); }
+.copy[data-state="fail"] { color:var(--pink); border-color:var(--pink); }
+.alt { color:var(--overlay); font-size:13px; margin:0; }
+.alt code { color:var(--subtext); overflow-wrap:anywhere; }
 
-    .hero h1 span {
-      color: var(--green);
-    }
+/* ── Sections ──────────────────────────────────────────── */
+section { padding:46px 0 8px; }
+/* Anchor targets must clear the 48px sticky bar. */
+section[id], #top { scroll-margin-top:62px; }
+.head { display:flex; align-items:baseline; gap:14px; margin:0 0 6px; }
+.head h2 { font-size:13px; letter-spacing:2.4px; text-transform:uppercase; color:var(--green); margin:0; font-weight:700; white-space:nowrap; }
+.head .rule { flex:1; height:1px; background:var(--line); }
+.head .cmd { color:var(--overlay); font-size:13px; white-space:nowrap; }
+@media (max-width:480px) {
+  .head { flex-wrap:wrap; }
+  .head .rule { min-width:16px; }
+  .head .cmd { white-space:normal; overflow-wrap:anywhere; }
+}
+.note { color:var(--subtext); margin:0 0 20px; max-width:66ch; }
+.note code, .inline { color:var(--teal); }
 
-    .hero-logo {
-      font-family: var(--mono);
-      font-size: clamp(6px, 1.4vw, 14px);
-      line-height: 1.15;
-      font-weight: 700;
-      margin-bottom: 24px;
-      white-space: pre;
-      display: inline-block;
-    }
+/* ── Terminal capture ──────────────────────────────────── */
+figure { margin:0 0 18px; }
+.term { border:1px solid var(--line); background:var(--panel); }
+.term .cap {
+  display:flex; justify-content:space-between; gap:16px;
+  padding:7px 12px; border-bottom:1px solid var(--line);
+  font-size:12px; color:var(--overlay); background:var(--base);
+}
+.term .cap span:last-child { color:var(--surface); }
+/* Terminal line-height stays near 1 so the captures keep their grid — blank
+   rows and block-drawing glyphs have to sit as tightly as they do in a shell. */
+.term pre {
+  margin:0; padding:14px 12px; overflow-x:auto; scrollbar-width:thin;
+  font-size:12px; line-height:1.28; tab-size:4;
+}
+.term .ln { display:block; white-space:pre; min-height:1.28em; }
+figcaption { color:var(--overlay); font-size:12.5px; padding:8px 2px 0; }
 
-    .hero-logo .ui { color: var(--green); }
+@media (max-width:640px) { .term pre { font-size:11px; padding:10px 8px; } }
 
+/* narrow/wide capture swap */
+.only-wide { display:block; }
+.only-narrow { display:none; }
+@media (max-width:760px) { .only-wide { display:none; } .only-narrow { display:block; } }
 
-    .hero p {
-      font-size: 18px;
-      color: var(--text-dim);
-      max-width: 560px;
-      margin: 0 auto 36px;
-    }
+/* ── Legend / key-value grids ──────────────────────────── */
+.legend { border:1px solid var(--line); border-bottom:0; margin:0 0 20px; }
+.legend > div { display:grid; grid-template-columns:16.5em minmax(0,1fr); gap:18px; padding:9px 14px; border-bottom:1px solid var(--line); align-items:baseline; }
+.legend dt { margin:0; color:var(--text); white-space:pre; overflow-x:auto; scrollbar-width:none; font-size:13px; }
+.legend dt.spark { font-size:15px; letter-spacing:1px; line-height:1; }
+.legend dd { margin:0; color:var(--subtext); font-size:13.5px; }
+@media (max-width:700px) { .legend > div { grid-template-columns:minmax(0,1fr); gap:2px; } }
 
-    /* ── Install box ── */
-    .install-box {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px 24px;
-      display: inline-flex;
-      align-items: center;
-      gap: 16px;
-      font-family: var(--mono);
-      font-size: 14px;
-      max-width: 100%;
-      position: relative;
-    }
+/* ── Spec rows (the smaller tools) ─────────────────────── */
+.rows { border:1px solid var(--line); border-bottom:0; }
+.row { display:grid; grid-template-columns:15em minmax(0,1fr); gap:22px; padding:14px; border-bottom:1px solid var(--line); }
+.row h3 { margin:0; font-size:14px; font-weight:700; color:var(--text); }
+.row .rc { margin:4px 0 0; font-size:12.5px; color:var(--teal); white-space:pre-wrap; }
+.row p { margin:0; color:var(--subtext); font-size:13.5px; }
+.row ul { margin:8px 0 0; padding:0; list-style:none; display:flex; flex-wrap:wrap; gap:4px 14px; }
+.row li { color:var(--overlay); font-size:12.5px; }
+.row li::before { content:"·"; color:var(--surface); margin-right:6px; }
+@media (max-width:700px) { .row { grid-template-columns:minmax(0,1fr); gap:10px; } }
 
-    .install-box .prompt {
-      color: var(--green-dim);
-      user-select: none;
-    }
+/* keycap list */
+.keys { display:flex; flex-wrap:wrap; gap:6px 8px; margin:0 0 18px; padding:0; list-style:none; }
+.keys li { font-size:12.5px; color:var(--subtext); border:1px solid var(--line); padding:2px 9px; background:var(--base); }
+.keys kbd { font:inherit; color:var(--teal); font-weight:700; }
 
-    .install-box code {
-      color: var(--text-bright);
-      white-space: nowrap;
-    }
+/* code block */
+pre.code {
+  margin:0 0 18px; padding:14px; border:1px solid var(--line); background:var(--base);
+  overflow-x:auto; scrollbar-width:thin; font-size:13px; line-height:1.7; color:var(--text);
+}
+pre.code .c { color:var(--overlay); }
+pre.code .p { color:var(--surface); }
 
-    .install-box .copy-btn {
-      background: transparent;
-      border: 1px solid var(--border);
-      color: var(--text-dim);
-      padding: 4px 10px;
-      border-radius: 4px;
-      cursor: pointer;
-      font-family: var(--mono);
-      font-size: 12px;
-      transition: all 0.2s;
-    }
+.cols { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:20px; }
+@media (max-width:820px) { .cols { grid-template-columns:minmax(0,1fr); } }
 
-    .install-box .copy-btn:hover {
-      color: var(--green);
-      border-color: var(--green-dim);
-    }
-
-    /* ── Terminal demo ── */
-    .terminal-section {
-      padding: 40px 0 60px;
-    }
-
-    .terminal {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      overflow: hidden;
-      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-    }
-
-    .terminal-bar {
-      background: #161b22;
-      padding: 10px 16px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .terminal-dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--border);
-    }
-
-    .terminal-dot.red { background: #f04040; }
-    .terminal-dot.yellow { background: #f0c040; }
-    .terminal-dot.green { background: #00c040; }
-
-    .terminal-title {
-      flex: 1;
-      text-align: center;
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--text-dim);
-    }
-
-    .terminal-body {
-      padding: 20px;
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.7;
-      overflow-x: auto;
-    }
-
-    .terminal-body .line {
-      white-space: pre;
-    }
-
-    /* terminal colors */
-    .t-green { color: var(--green); }
-    .t-green-dim { color: var(--green-dim); }
-    .t-green-dark { color: var(--green-dark); }
-    .t-cyan { color: var(--cyan); }
-    .t-yellow { color: var(--yellow); }
-    .t-orange { color: var(--orange); }
-    .t-red { color: var(--red); }
-    .t-magenta { color: var(--magenta); }
-    .t-blue { color: var(--blue); }
-    .t-dim { color: var(--text-dim); }
-    .t-bright { color: var(--text-bright); }
-    .t-bold { font-weight: 700; }
-
-    /* ── Features grid ── */
-    .features {
-      padding: 60px 0;
-    }
-
-    .features h2 {
-      font-family: var(--mono);
-      font-size: 28px;
-      color: var(--text-bright);
-      text-align: center;
-      margin-bottom: 48px;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 20px;
-    }
-
-    .feature-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 28px;
-      transition: border-color 0.2s, background 0.2s;
-    }
-
-    .feature-card:hover {
-      border-color: var(--green-dim);
-      background: var(--bg-card-hover);
-    }
-
-    .feature-icon {
-      font-family: var(--mono);
-      font-size: 20px;
-      margin-bottom: 14px;
-      display: block;
-      color: var(--green);
-    }
-
-    .feature-card h3 {
-      font-family: var(--mono);
-      font-size: 16px;
-      color: var(--green);
-      margin-bottom: 8px;
-    }
-
-    .feature-card p {
-      font-size: 14px;
-      color: var(--text-dim);
-      line-height: 1.6;
-    }
-
-    .feature-card code {
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--cyan);
-      background: rgba(86, 212, 221, 0.08);
-      padding: 2px 6px;
-      border-radius: 3px;
-    }
-
-    /* ── Details sections ── */
-    .tool-section {
-      padding: 48px 0;
-      border-top: 1px solid var(--border);
-    }
-
-    .tool-section h2 {
-      font-family: var(--mono);
-      font-size: 22px;
-      color: var(--text-bright);
-      margin-bottom: 8px;
-    }
-
-    .tool-section .subtitle {
-      color: var(--text-dim);
-      font-size: 15px;
-      margin-bottom: 24px;
-    }
-
-    .tool-terminal {
-      background: #0d1117;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 16px 20px;
-      font-family: var(--mono);
-      font-size: 13px;
-      line-height: 1.7;
-      overflow-x: auto;
-      margin-bottom: 20px;
-    }
-
-    .tool-terminal .line {
-      white-space: pre;
-    }
-
-    .feature-list {
-      list-style: none;
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 8px 24px;
-    }
-
-    .feature-list li {
-      font-size: 14px;
-      color: var(--text-dim);
-      padding-left: 20px;
-      position: relative;
-    }
-
-    .feature-list li::before {
-      content: '›';
-      position: absolute;
-      left: 4px;
-      color: var(--green-dim);
-      font-weight: 700;
-    }
-
-    /* ── Quick start ── */
-    .quickstart {
-      padding: 60px 0;
-      border-top: 1px solid var(--border);
-    }
-
-    .quickstart h2 {
-      font-family: var(--mono);
-      font-size: 28px;
-      color: var(--text-bright);
-      text-align: center;
-      margin-bottom: 36px;
-    }
-
-    .quickstart-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 20px;
-    }
-
-    .quickstart-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 24px;
-    }
-
-    .quickstart-card .step {
-      font-family: var(--mono);
-      font-size: 12px;
-      color: var(--green);
-      letter-spacing: 1px;
-      text-transform: uppercase;
-      margin-bottom: 8px;
-    }
-
-    .quickstart-card h3 {
-      font-size: 16px;
-      color: var(--text-bright);
-      margin-bottom: 12px;
-    }
-
-    .quickstart-card pre {
-      background: rgba(0, 0, 0, 0.3);
-      padding: 12px 16px;
-      border-radius: 6px;
-      font-family: var(--mono);
-      font-size: 13px;
-      color: var(--text);
-      overflow-x: auto;
-      line-height: 1.6;
-    }
-
-    .quickstart-card pre .comment {
-      color: var(--text-dim);
-    }
-
-    /* ── Footer ── */
-    footer {
-      padding: 40px 0;
-      border-top: 1px solid var(--border);
-      text-align: center;
-      font-size: 14px;
-      color: var(--text-dim);
-    }
-
-    footer a {
-      color: var(--text-dim);
-    }
-
-    footer a:hover {
-      color: var(--green);
-    }
-
-    .footer-links {
-      display: flex;
-      justify-content: center;
-      gap: 24px;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-    }
-
-    /* ── Responsive ── */
-    @media (max-width: 640px) {
-      .hero { padding: 48px 0 40px; }
-      .install-box {
-        flex-direction: column;
-        gap: 10px;
-        padding: 14px 16px;
-      }
-      .install-box code {
-        font-size: 12px;
-        white-space: normal;
-        word-break: break-all;
-      }
-      .terminal-body { font-size: 11px; padding: 14px; }
-      .features-grid { grid-template-columns: 1fr; }
-    }
-  </style>
+/* ── Footer ────────────────────────────────────────────── */
+footer { margin-top:56px; border-top:1px solid var(--line); padding:26px 0 48px; color:var(--overlay); font-size:13px; }
+footer .wrap { display:flex; flex-wrap:wrap; gap:8px 24px; align-items:baseline; }
+footer a { color:var(--subtext); text-decoration:none; }
+footer a:hover { color:var(--green); }
+footer .sp { margin-left:auto; }
+</style>
 </head>
 <body>
 
-  <!-- Hero -->
-  <section class="hero">
-    <div class="container">
-      <div class="hero-badge">Open Source</div>
-      <h1><div class="hero-logo"> ██████╗ ██╗      █████╗ ██╗   ██╗██████╗ ███████╗<span class="ui">████████╗██╗   ██╗██╗</span>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="bar">
+  <div class="wrap">
+    <a class="brand" href="#top">claude<b>tui</b></a>
+    <span class="ver">v0.8.6</span>
+    <nav aria-label="Sections">
+      <a href="#statusline">statusline</a>
+      <a href="#monitor">monitor</a>
+      <a href="#efficiency" class="opt">efficiency</a>
+      <a href="#sniffer" class="opt">sniffer</a>
+      <a href="#more" class="opt">more</a>
+      <a href="#install">install</a>
+      <a href="https://github.com/slima4/claude-tui">github</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+<div class="wrap" id="top">
+
+  <div class="masthead">
+    <div>
+      <pre class="wordmark" role="img" aria-label="ClaudeTUI"> ██████╗ ██╗      █████╗ ██╗   ██╗██████╗ ███████╗<span class="ui">████████╗██╗   ██╗██╗</span>
 ██╔════╝ ██║     ██╔══██╗██║   ██║██╔══██╗██╔════╝<span class="ui">╚══██╔══╝██║   ██║██║</span>
 ██║      ██║     ███████║██║   ██║██║  ██║█████╗  <span class="ui">   ██║   ██║   ██║██║</span>
 ██║      ██║     ██╔══██║██║   ██║██║  ██║██╔══╝  <span class="ui">   ██║   ██║   ██║██║</span>
 ╚██████╗ ███████╗██║  ██║╚██████╔╝██████╔╝███████╗<span class="ui">   ██║   ╚██████╔╝██║</span>
- ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝<span class="ui">   ╚═╝    ╚═════╝ ╚═╝</span></div></h1>
-      <p>Real-time statusline, live monitor, session analytics, hooks, and slash commands for Claude Code.</p>
-      <div class="install-box">
-        <span class="prompt">$</span>
-        <code>brew tap slima4/claude-tui &amp;&amp; brew install claude-tui</code>
-        <button class="copy-btn" onclick="copyInstall(this)">copy</button>
+ ╚═════╝ ╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚═════╝ ╚══════╝<span class="ui">   ╚═╝    ╚═════╝ ╚═╝</span></pre>
+      <h1>Instrumentation for <b>Claude&nbsp;Code</b> sessions.</h1>
+      <p class="lede">Context fill, cost, cache ratio, compaction distance, and live tool activity — parsed from the session transcript and drawn in your terminal.</p>
+      <p class="lede tight">Every terminal block on this page is real output, captured from the tools in this repo. Nothing here is a mockup.</p>
+    </div>
+    <dl class="spec">
+      <div><dt>version</dt><dd>0.8.6</dd></div>
+      <div><dt>runtime</dt><dd>Python 3.13+, stdlib only</dd></div>
+      <div><dt>dependencies</dt><dd>none</dd></div>
+      <div><dt>platforms</dt><dd>macOS, Linux, WSL 2</dd></div>
+      <div><dt>license</dt><dd><a href="https://github.com/slima4/claude-tui/blob/main/LICENSE">MIT</a></dd></div>
+      <div><dt>source</dt><dd><a href="https://github.com/slima4/claude-tui">github.com/slima4/claude-tui</a></dd></div>
+    </dl>
+  </div>
+
+  <div class="install">
+    <div class="install-row">
+      <span class="sh" aria-hidden="true">$</span>
+      <code id="cmd-brew">brew install slima4/claude-tui/claude-tui</code>
+      <button class="copy" type="button" data-copy="cmd-brew">copy</button>
+    </div>
+    <div class="install-row">
+      <span class="sh" aria-hidden="true">$</span>
+      <code id="cmd-setup">claudetui setup</code>
+      <button class="copy" type="button" data-copy="cmd-setup">copy</button>
+    </div>
+  </div>
+  <p class="alt">No Homebrew? <code>curl -sSL https://raw.githubusercontent.com/slima4/claude-tui/main/install.sh | bash</code> — see <a href="#install">install</a>.</p>
+
+  <!-- ── STATUSLINE ─────────────────────────────────────── -->
+  <section id="statusline">
+    <div class="head">
+      <h2>Statusline</h2><span class="rule"></span><span class="cmd">claudetui mode full</span>
+    </div>
+    <p class="note">Claude Code renders a status line under the prompt on every turn. This replaces it with a readout of what the session is actually costing you.</p>
+
+    <figure>
+      <div class="term">
+        <div class="cap"><span>full mode · 148 columns</span><span>real capture</span></div>
+        <pre class="only-wide" aria-hidden="true"><span class="ln"> <span style="color:#03a062">00111</span><span style="color:#00ff41">1</span><span style="color:#003b00">0</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2aa">▮</span><span style="color:#9fe2b3">▮</span><span style="color:#9ce2bc">▮</span><span style="color:#99e2c5">▮</span><span style="color:#96e2ce">▮</span><span style="color:#9ae2d2">▮</span><span style="color:#afe2ca">▮</span><span style="color:#c4e2c2">▎</span><span style="color:#373b50">▯▯▯▯▯▯▯▯▯▯</span><span style="color:#8c91aa">┆</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">C 42%</span> <span style="color:#f9e2af">⚡</span><span style="color:#94e2d5">421.3k</span><span style="opacity:.62">/</span><span style="color:#6c7086">1.0M</span> <span style="color:#6c7086">⋮</span> <span style="color:#ff8700">ETA 13</span> <span style="color:#6c7086">turns</span> <span style="color:#6c7086">⋮</span> <span style="color:#cba6f7;font-weight:700">Opus 5</span> <span style="color:#6c7086">⋮</span> <span style="color:#967f5b">▅</span><span style="color:#578d8a">▃</span><span style="color:#84956b">▅</span><span style="color:#ac736c">▇</span><span style="color:#ac9168">▆</span><span style="color:#b87a73">▇</span><span style="color:#b79a6e">▆</span><span style="color:#9aae7e">▃</span><span style="color:#79b38a">▂</span><span style="color:#7cb88d">▁</span><span style="color:#d48d84">█</span><span style="color:#d99188">▆</span><span style="color:#78c3be">▃</span><span style="color:#7bc8c3">▂</span><span style="color:#e2bf88">▅</span><span style="color:#bed69b">▄</span> <span style="color:#6c7086">⋮</span> <span style="color:#f9e2af">$12.47</span> <span style="color:#6c7086">⋮</span> <span style="color:#cdd6f4">⏱ 2h 10m</span> <span style="color:#6c7086">⋮</span> <span style="color:#6c7086">CMP</span> <span style="color:#94e2d5">1</span><span style="color:#6c7086">x</span> <span style="color:#6c7086">⋮</span> <span style="color:#ff8700">54%</span> <span style="color:#6c7086">eff</span> <span style="color:#6c7086">⋮</span> <span style="color:#6c7086">#a1b2c3d4</span></span>
+<span class="ln"> <span style="color:#00ff41">0</span><span style="color:#03a062">100</span><span style="color:#00ff41">0</span><span style="color:#003b00">1</span><span style="color:#03a062">1</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2aa">▮</span><span style="color:#9fe2b3">▮</span><span style="color:#9ce2bc">▮</span><span style="color:#99e2c5">▮</span><span style="color:#96e2ce">▮</span><span style="color:#9ae2d2">▋</span><span style="color:#373b50">▯▯▯▯▯▯▯▯▯▯▯▯▯</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">S 34%</span> <span style="color:#f9e2af">⏱</span> 1h59m <span style="color:#6c7086">⋮</span> <span style="color:#a6e3a1">app</span> <span style="color:#6c7086">⋮</span> <span style="color:#a6e3a1">⎇ feature/auth</span> <span style="color:#a6e3a1">+180</span> <span style="color:#f38ba8">-60</span> <span style="color:#6c7086">⋮</span> <span style="color:#f9e2af">TRN</span> <span style="color:#f9e2af">35</span> <span style="color:#6c7086">⋮</span> <span style="color:#6c7086">FIL</span> <span style="color:#94e2d5">2</span> <span style="color:#6c7086">⋮</span> <span style="color:#a6e3a1">ERR</span> <span style="color:#a6e3a1">0</span> <span style="color:#6c7086">⋮</span> <span style="color:#a6e3a1">CAC</span> <span style="color:#a6e3a1">99%</span> <span style="color:#6c7086">⋮</span> <span style="color:#ff8700">THK</span> <span style="color:#ff8700">8</span> <span style="color:#6c7086">⋮</span> <span style="color:#6c7086">~$0.36/turn</span></span>
+<span class="ln"> <span style="color:#003b00">1</span><span style="color:#00ff41">000</span><span style="color:#003b00">10</span><span style="color:#03a062">1</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2aa">▮</span><span style="color:#9fe2b3">▮</span><span style="color:#9ce2bc">▮</span><span style="color:#99e2c5">▮</span><span style="color:#96e2ce">▮</span><span style="color:#9ae2d2">▮</span><span style="color:#afe2ca">▮</span><span style="color:#c4e2c2">▮</span><span style="color:#dae2ba">▮</span><span style="color:#efe2b2">▮</span><span style="color:#f9dcaa">▮</span><span style="color:#f9d2a1">▮</span><span style="color:#f9c899">▮</span><span style="color:#f9be91">▏</span><span style="color:#373b50">▯▯▯▯▯</span><span style="color:#5a5f78">▕</span> <span style="color:#f9e2af">W 71%</span> <span style="color:#f9e2af">⏱</span> 71h59m</span>
+<span class="ln">         <span style="color:#6c7086">read</span> <span style="color:#a6e3a1">auth.ts</span> <span style="color:#6c7086">→</span> <span style="color:#6c7086">edit</span> <span style="color:#a6e3a1">auth.ts</span> <span style="color:#6c7086">→</span> <span style="color:#6c7086">bash</span> <span style="color:#a6e3a1">npm</span> <span style="color:#6c7086">→</span> <span style="color:#6c7086">edit</span> <span style="color:#a6e3a1">session.ts</span> <span style="color:#6c7086">⋮</span><span style="color:#f9e2af">auth.ts</span><span style="color:#6c7086">×1</span> <span style="color:#f9e2af">session.ts</span><span style="color:#6c7086">×1</span></span></pre>
+        <pre class="only-narrow" aria-hidden="true"><span class="ln"> <span style="color:#cba6f7;font-weight:700">Opus 5</span> <span style="color:#6c7086">⋮</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2ac">▮</span><span style="color:#9ee2b8">▮</span><span style="color:#9ae2c3">▮</span><span style="color:#96e2cf">▮</span><span style="color:#a1e2cf">▮</span><span style="color:#bce2c5">▋</span><span style="color:#373b50">▯▯▯▯▯▯▯▯</span><span style="color:#8c91aa">┆</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">C 42%</span> <span style="color:#f9e2af">⚡</span><span style="color:#94e2d5">421.3k</span><span style="opacity:.62">/</span><span style="color:#6c7086">1.0M</span> <span style="color:#6c7086">⋮</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2ac">▮</span><span style="color:#9ee2b8">▮</span><span style="color:#9ae2c3">▮</span><span style="color:#96e2cf">▮</span><span style="color:#a1e2cf">▍</span><span style="color:#373b50">▯▯▯▯▯▯▯▯▯▯</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">S 34%</span> <span style="color:#f9e2af">⏱</span> 1h59m <span style="color:#6c7086">⋮</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2ac">▮</span><span style="color:#9ee2b8">▮</span><span style="color:#9ae2c3">▮</span><span style="color:#96e2cf">▮</span><span style="color:#a1e2cf">▮</span><span style="color:#bce2c5">▮</span><span style="color:#d7e2bb">▮</span><span style="color:#f2e2b1">▮</span><span style="color:#f9d8a7">▮</span><span style="color:#f9cc9c">▮</span><span style="color:#f9bf91">▎</span><span style="color:#373b50">▯▯▯▯</span><span style="color:#5a5f78">▕</span> <span style="color:#f9e2af">W 71%</span> <span style="color:#f9e2af">⏱</span> 71h59m</span></pre>
+      </div>
+      <figcaption>Four rendered rows: context bar, 5-hour plan bar, 7-day plan bar, and the live tool trace. Every field is documented below. Narrow screens show compact mode instead.</figcaption>
+    </figure>
+
+    <dl class="legend">
+      <div><dt>C 42%  ⚡421.3k/1.0M</dt><dd>Context fill and token count against the window. The bar's colour tracks the compaction ceiling, not 100% — it turns warm as you approach the point where Claude Code compacts.</dd></div>
+      <div><dt>ETA 13 turns</dt><dd>Estimated turns before compaction, from a fixed 33k-token buffer model and your recent per-turn growth.</dd></div>
+      <div><dt>CMP 1x</dt><dd>Compactions so far this session.</dd></div>
+      <div><dt>54% eff</dt><dd>Useful context divided by total context built. Falls as compactions discard work you already paid to load.</dd></div>
+      <div><dt class="spark"><span style="color:#8ed2a0">▇▄</span><span style="color:#b99bc6">↓</span><span style="color:#a9d69b">▅▅</span><span style="color:#91d7a5">▃</span><span style="color:#bed69b">▅</span><span style="color:#f0a096">▇</span><span style="color:#e8c48c">▆</span></dt><dd>Per-turn output sparkline. <span class="inline">↓</span> marks a compaction boundary; older bars fade.</dd></div>
+      <div><dt>S 34% ⏱ 1h59m</dt><dd>5-hour plan limit used, and the countdown to reset. Pro/Max only — Claude Code supplies it, so there's no extra API call.</dd></div>
+      <div><dt>W 71% ⏱ 71h59m</dt><dd>7-day plan limit and its reset countdown.</dd></div>
+      <div><dt>⎇ feature/auth +180 -60</dt><dd>Git branch and uncommitted diff stat.</dd></div>
+      <div><dt>TRN · FIL · ERR</dt><dd>Turns, files touched, and tool calls that came back as errors.</dd></div>
+      <div><dt>CAC 99% · THK 8</dt><dd>Cache hit ratio and thinking-block count.</dd></div>
+      <div><dt>$12.47 · ~$0.36/turn</dt><dd>Session cost and cost per turn, taken from Claude Code's own accounting rather than re-derived.</dd></div>
+      <div><dt>read auth.ts → edit auth.ts</dt><dd>The current turn's tool trace, with per-file edit counts on the right.</dd></div>
+      <div><dt>0011110</dt><dd>Matrix-rain widget. Swappable: <span class="inline">matrix</span>, <span class="inline">hex</span>, <span class="inline">bars</span>, <span class="inline">progress</span>, or <span class="inline">none</span>.</dd></div>
+    </dl>
+
+    <figure>
+      <div class="term">
+        <div class="cap"><span>compact mode · one line</span><span>real capture</span></div>
+        <pre aria-hidden="true"><span class="ln"> <span style="color:#cba6f7;font-weight:700">Opus 5</span> <span style="color:#6c7086">⋮</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2aa">▮</span><span style="color:#9fe2b3">▮</span><span style="color:#9ce2bc">▮</span><span style="color:#99e2c5">▮</span><span style="color:#96e2ce">▮</span><span style="color:#9ae2d2">▮</span><span style="color:#afe2ca">▮</span><span style="color:#c4e2c2">▎</span><span style="color:#373b50">▯▯▯▯▯▯▯▯▯▯</span><span style="color:#8c91aa">┆</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">C 42%</span> <span style="color:#f9e2af">⚡</span><span style="color:#94e2d5">421.3k</span><span style="opacity:.62">/</span><span style="color:#6c7086">1.0M</span> <span style="color:#6c7086">⋮</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2aa">▮</span><span style="color:#9fe2b3">▮</span><span style="color:#9ce2bc">▮</span><span style="color:#99e2c5">▮</span><span style="color:#96e2ce">▮</span><span style="color:#9ae2d2">▋</span><span style="color:#373b50">▯▯▯▯▯▯▯▯▯▯▯▯▯</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">S 34%</span> <span style="color:#f9e2af">⏱</span> 1h59m <span style="color:#6c7086">⋮</span> <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a2e2aa">▮</span><span style="color:#9fe2b3">▮</span><span style="color:#9ce2bc">▮</span><span style="color:#99e2c5">▮</span><span style="color:#96e2ce">▮</span><span style="color:#9ae2d2">▮</span><span style="color:#afe2ca">▮</span><span style="color:#c4e2c2">▮</span><span style="color:#dae2ba">▮</span><span style="color:#efe2b2">▮</span><span style="color:#f9dcaa">▮</span><span style="color:#f9d2a1">▮</span><span style="color:#f9c899">▮</span><span style="color:#f9be91">▏</span><span style="color:#373b50">▯▯▯▯▯</span><span style="color:#5a5f78">▕</span> <span style="color:#f9e2af">W 71%</span> <span style="color:#f9e2af">⏱</span> 71h59m</span></pre>
+      </div>
+      <figcaption>Same data, one row — <code>claudetui mode compact</code>.</figcaption>
+    </figure>
+
+    <p class="note">A third mode, <code>claudetui mode custom</code>, opens a curses configurator where every field above is an independent toggle, saved to <code>~/.claude/claudeui.json</code>.</p>
+  </section>
+
+  <!-- ── MONITOR ────────────────────────────────────────── -->
+  <section id="monitor">
+    <div class="head">
+      <h2>Monitor</h2><span class="rule"></span><span class="cmd">claudetui monitor</span>
+    </div>
+    <p class="note">A dashboard for a second terminal. It finds the active session, follows the transcript file, and redraws when it changes.</p>
+
+    <figure>
+      <div class="term">
+        <div class="cap"><span>claudetui monitor · 84 columns</span><span>real capture</span></div>
+        <pre aria-hidden="true"><span class="ln"><span style="color:#03a062">01001</span><span style="color:#00ff41">0</span><span style="color:#003b00">1</span><span style="color:#03a062">01</span><span style="color:#003b00">10</span><span style="color:#03a062">011</span><span style="color:#003b00">0</span><span style="color:#03a062">00011</span><span style="color:#00ff41">1</span><span style="color:#003b00">0</span><span style="color:#03a062">10</span><span style="color:#003b00">01</span><span style="color:#03a062">010</span><span style="color:#003b00">1</span><span style="color:#03a062">11111</span><span style="color:#00ff41">0</span><span style="color:#003b00">0</span><span style="color:#03a062">01</span><span style="color:#003b00">11</span><span style="color:#03a062">100</span><span style="color:#003b00">0</span><span style="color:#03a062">00110</span><span style="color:#00ff41">1</span><span style="color:#003b00">1</span><span style="color:#03a062">00</span><span style="color:#003b00">11</span><span style="color:#03a062">011</span><span style="color:#003b00">1</span><span style="color:#03a062">10101</span><span style="color:#00ff41">0</span><span style="color:#003b00">0</span><span style="color:#03a062">10</span><span style="color:#003b00">10</span><span style="color:#03a062">100</span><span style="color:#003b00">0</span><span style="color:#03a062">11000</span><span style="color:#00ff41">1</span><span style="color:#003b00">1</span></span>
+<span class="ln"><span style="color:#03a062">────────────────────────────────────────────────────────────────────────────────────</span></span>
+<span class="ln">  <span style="color:#a6e3a1">●</span> <span style="color:#cba6f7;font-weight:700">claude-sonnet-5</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">a1b2c3d4</span>  <span style="opacity:.62">│</span>  <span style="color:#cdd6f4">2h 09m 35s</span>  <span style="opacity:.62">│</span>  <span style="color:#a6e3a1">ACTIVE</span></span>
+<span class="ln"></span>
+<span class="ln">  <span style="font-weight:700">CONTEXT</span></span>
+<span class="ln">  <span style="color:#5a5f78">▏</span><span style="color:#a6e3a1">▮</span><span style="color:#a4e2a4">▮</span><span style="color:#a3e2a8">▮</span><span style="color:#a2e2ab">▮</span><span style="color:#a1e2af">▮</span><span style="color:#9fe2b2">▮</span><span style="color:#9ee2b6">▮</span><span style="color:#9de2b9">▮</span><span style="color:#9ce2bd">▮</span><span style="color:#9ae2c0">▮</span><span style="color:#99e2c4">▮</span><span style="color:#98e2c7">▮</span><span style="color:#97e2cb">▮</span><span style="color:#96e2ce">▮</span><span style="color:#94e2d2">▮</span><span style="color:#96e2d4">▮</span><span style="color:#9ee2d0">▮</span><span style="color:#a6e2cd">▮</span><span style="color:#afe2ca">▮</span><span style="color:#b7e2c7">▮</span><span style="color:#bfe2c4">▮</span><span style="color:#c7e2c1">▏</span><span style="color:#373b50">▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯▯</span><span style="color:#8c91aa">┆</span><span style="color:#373b50">▯</span><span style="color:#5a5f78">▕</span> <span style="color:#a6e3a1">C 42%</span> <span style="color:#f9e2af">⚡</span><span style="color:#94e2d5">421.3k</span><span style="opacity:.62">/</span><span style="color:#6c7086">1.0M</span></span>
+<span class="ln"></span>
+<span class="ln">  <span style="color:#548885">▂</span><span style="color:#558a87">▂</span><span style="color:#578c89">▂</span><span style="color:#588e8b">▂</span><span style="color:#83936a">▄</span><span style="color:#5b938f">▂</span><span style="color:#aa716a">▇</span><span style="color:#889a6f">▃</span><span style="color:#af746d">▇</span><span style="color:#b1766f">▇</span><span style="color:#b47870">▆</span><span style="color:#90a275">▃</span><span style="color:#b87b73">▇</span><span style="color:#65a39f">▂</span><span style="color:#66a5a1">▃</span><span style="color:#68a8a4">▂</span><span style="color:#c28179">▇</span><span style="color:#9baf7f">▄</span><span style="color:#cdaad2">↓</span><span style="color:#c2a475">▅</span><span style="color:#c5a677">▅</span><span style="color:#6fb4b0">▃</span><span style="color:#a5ba86">▅</span><span style="color:#d38c84">▇</span><span style="color:#ceae7c">▆</span><span style="color:#d89087">▇</span><span style="color:#d3b27f">▆</span><span style="color:#aec48e">▃</span><span style="color:#86c799">▂</span><span style="color:#88ca9b">▁</span><span style="color:#e4988e">█</span><span style="color:#e69990">▆</span><span style="color:#7ecbc6">▃</span><span style="color:#7fcdc8">▂</span><span style="color:#e5c28a">▅</span><span style="color:#bed69b">▄</span></span>
+<span class="ln">  <span style="opacity:.62">Compactions:</span> <span style="color:#94e2d5">1</span>  <span style="opacity:.62">│</span>  <span style="opacity:.62">Turns left:</span> <span style="color:#ff8700">~13</span>  <span style="opacity:.62">│</span>  <span style="opacity:.62">Since compact:</span> <span style="color:#94e2d5">16</span></span>
+<span class="ln">  <span style="opacity:.62">Efficiency:</span> <span style="color:#ff8700">54%</span>  <span style="opacity:.62">│</span>  <span style="opacity:.62">Wasted:</span> <span style="color:#f38ba8">646.4k</span><span style="opacity:.62">/</span><span style="color:#6c7086">1.4M</span></span>
+<span class="ln"></span>
+<span class="ln">  <span style="font-weight:700">ACTIVITY</span></span>
+<span class="ln">  <span style="color:#94e2d5">2</span> <span style="opacity:.62">files edited</span>  <span style="opacity:.62">│</span>  <span style="color:#a6e3a1">+0</span> <span style="opacity:.62">/</span> <span style="color:#f38ba8">-0</span> <span style="opacity:.62">lines</span></span>
+<span class="ln">  <span style="color:#6c7086">16</span> <span style="opacity:.62">read</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">21</span> <span style="opacity:.62">edit</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">8</span> <span style="opacity:.62">grep</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">15</span> <span style="opacity:.62">bash</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">12</span> <span style="opacity:.62">write</span></span>
+<span class="ln"></span>
+<span class="ln">  <span style="font-weight:700">CURRENT</span></span>
+<span class="ln">  <span style="color:#94e2d5">4</span> tools  <span style="opacity:.62">│</span>  <span style="opacity:.62">Edit:</span><span style="color:#94e2d5">2</span>  <span style="opacity:.62">Read:</span><span style="color:#94e2d5">1</span>  <span style="opacity:.62">Bash:</span><span style="color:#94e2d5">1</span></span>
+<span class="ln">  <span style="opacity:.62">read</span> <span style="color:#a6e3a1">auth.ts</span> <span style="opacity:.62">→</span> <span style="opacity:.62">edit</span> <span style="color:#a6e3a1">auth.ts</span> <span style="opacity:.62">→</span> <span style="opacity:.62">bash</span> <span style="color:#a6e3a1">npm</span> <span style="opacity:.62">→</span> <span style="opacity:.62">edit</span> <span style="color:#a6e3a1">session.ts</span> <span style="opacity:.62">│</span> <span style="color:#f9e2af">auth.ts</span><span style="opacity:.62">×1</span> <span style="color:#f9e2af">session.ts</span><span style="opacity:.62">×1</span></span>
+<span class="ln">  <span style="color:#a6e3a1">auth.ts</span><span style="opacity:.62">(1r/1e)</span> <span style="color:#a6e3a1">session.ts</span><span style="opacity:.62">(0r/1e)</span></span>
+<span class="ln">  <span style="color:#a6e3a1">0</span> errors  <span style="opacity:.62">│</span>  <span style="color:#cba6f7">1</span> thinking</span>
+<span class="ln"></span>
+<span class="ln">  <span style="font-weight:700">SESSION</span></span>
+<span class="ln">  <span style="color:#6c7086">35</span> <span style="opacity:.62">turns</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">72</span> <span style="opacity:.62">tools</span>  <span style="opacity:.62">│</span>  <span style="opacity:.62">Edit:</span><span style="color:#6c7086">21</span>  <span style="opacity:.62">Read:</span><span style="color:#6c7086">16</span>  <span style="opacity:.62">Bash:</span><span style="color:#6c7086">15</span></span>
+<span class="ln">  <span style="opacity:.62">auth.ts(10r/25e)</span> <span style="opacity:.62">session.ts(6r/8e)</span></span>
+<span class="ln">  <span style="color:#a6e3a1">0</span> <span style="opacity:.62">errors</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">8</span> <span style="opacity:.62">thinking (23%)</span>  <span style="opacity:.62">│</span>  <span style="color:#6c7086">99%</span> <span style="opacity:.62">cache</span></span>
+<span class="ln">  <span style="opacity:.62">17:49:45</span>  <span style="color:#6c7086">read auth.ts</span></span>
+<span class="ln">  <span style="opacity:.62">17:49:45</span>  <span style="color:#a6e3a1">edit auth.ts</span></span>
+<span class="ln">  <span style="opacity:.62">17:51:10</span>  <span style="color:#94e2d5">$ npm test -- auth</span></span>
+<span class="ln">  <span style="opacity:.62">17:51:10</span>  <span style="color:#6c7086">read auth.ts</span></span>
+<span class="ln">  <span style="opacity:.62">17:52:35</span>  <span style="color:#6c7086">read auth.ts</span></span>
+<span class="ln">  <span style="opacity:.62">17:52:35</span>  <span style="color:#a6e3a1">edit auth.ts</span></span>
+<span class="ln">  <span style="opacity:.62">17:52:35</span>  <span style="color:#94e2d5">$ npm test</span></span>
+<span class="ln"><span style="opacity:.62">────────────────────────────────────────────────────────────────────────────────────</span></span>
+<span class="ln">  <span style="color:#94e2d5;font-weight:700">s</span><span style="opacity:.62">tats</span>  <span style="color:#94e2d5;font-weight:700">d</span><span style="opacity:.62">etails</span>  <span style="color:#94e2d5;font-weight:700">l</span><span style="opacity:.62">og</span>  <span style="color:#94e2d5;font-weight:700">w</span><span style="opacity:.62">aste</span>  <span style="color:#94e2d5;font-weight:700">e</span><span style="opacity:.62">xport</span>  <span style="opacity:.62">sessi</span><span style="color:#94e2d5;font-weight:700">o</span><span style="opacity:.62">ns</span>  <span style="color:#94e2d5;font-weight:700">c</span><span style="opacity:.62">onfig</span>  <span style="color:#94e2d5;font-weight:700">i</span><span style="opacity:.62">nfo</span>  <span style="color:#94e2d5;font-weight:700">?</span><span style="opacity:.62">help</span>  <span style="color:#94e2d5;font-weight:700">q</span><span style="opacity:.62">uit</span></span></pre>
+      </div>
+      <figcaption>Context bar and sparkline, compaction count and distance, per-turn tool trace with read/edit counts per file, session totals, and a scrollable event log.</figcaption>
+    </figure>
+
+    <ul class="keys">
+      <li><kbd>s</kbd> stats</li><li><kbd>d</kbd> details</li><li><kbd>l</kbd> log</li>
+      <li><kbd>w</kbd> waste chart</li><li><kbd>e</kbd> export</li><li><kbd>o</kbd> sessions</li>
+      <li><kbd>c</kbd> config</li><li><kbd>i</kbd> Claude status</li><li><kbd>?</kbd> help</li><li><kbd>q</kbd> quit</li>
+    </ul>
+    <p class="note">In the log viewer, <code>f</code> cycles the filter — errors, bash, edits, search, agents, skills, compactions — and <code>a</code> toggles live follow. Navigation is vim-style: <code>Ctrl+F</code>/<code>Ctrl+B</code>, <code>g</code>/<code>G</code>.</p>
+  </section>
+
+  <!-- ── EFFICIENCY ─────────────────────────────────────── -->
+  <section id="efficiency">
+    <div class="head">
+      <h2>Context efficiency</h2><span class="rule"></span><span class="cmd">claudetui chart</span>
+    </div>
+    <p class="note">Compaction is the expensive part of a long session: the window fills, Claude Code summarises, and everything below the summary is re-read from scratch. This chart splits each stretch between compactions into what the tokens actually bought.</p>
+
+    <figure>
+      <div class="term">
+        <div class="cap"><span>claudetui chart · also the monitor's <b>w</b> key</span><span>real capture</span></div>
+        <pre aria-hidden="true"><span class="ln">  <span style="font-weight:700">CONTEXT EFFICIENCY — HORIZONTAL</span></span>
+<span class="ln"></span>
+<span class="ln">    <span style="color:#94e2d5">▒▒</span> system   <span style="color:#f9e2af">▓▓</span> summary   <span style="color:#a6e3a1">██</span> useful   <span style="color:#6c7086">░░</span> headroom</span>
+<span class="ln"></span>
+<span class="ln">  <span style="font-weight:700">  Seg 1</span>  <span style="color:#94e2d5">▒▒▒</span><span style="color:#a6e3a1">██████████████████</span><span style="color:#6c7086">░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░</span>  <span style="color:#6c7086">1.0M</span></span>
+<span class="ln">          <span style="color:#94e2d5">65.6k</span> system<span style="opacity:.62"> │ </span><span style="color:#a6e3a1">293.0k</span> useful<span style="opacity:.62"> │ </span><span style="color:#6c7086">641.4k</span> headroom<span style="opacity:.62"> │ → compacted</span></span>
+<span class="ln">          <span style="opacity:.62">──── compact #1 ────</span></span>
+<span class="ln">  <span style="font-weight:700">→ Seg 2</span>  <span style="color:#94e2d5">▒▒▒</span><span style="color:#f9e2af">▓</span><span style="color:#a6e3a1">████████████████████</span>  <span style="color:#6c7086">421.3k</span></span>
+<span class="ln">          <span style="color:#94e2d5">65.6k</span> system<span style="opacity:.62"> │ </span><span style="color:#f9e2af">5.0k</span> summary<span style="opacity:.62"> │ </span><span style="color:#a6e3a1">350.7k</span> useful</span></pre>
+      </div>
+      <figcaption>Per-segment breakdown against the full window.</figcaption>
+    </figure>
+
+    <dl class="legend">
+      <div><dt><span style="color:#94e2d5">▒▒</span> system</dt><dd>System prompt and tool definitions — paid for on every request, never reclaimed.</dd></div>
+      <div><dt><span style="color:#f9e2af">▓▓</span> summary</dt><dd>Context carried across a compaction boundary as a summary.</dd></div>
+      <div><dt><span style="color:#a6e3a1">██</span> useful</dt><dd>Conversation and tool output that did work.</dd></div>
+      <div><dt><span style="color:#6c7086">░░</span> headroom</dt><dd>Window bought but never used before the segment ended. The number to shrink.</dd></div>
+    </dl>
+  </section>
+
+  <!-- ── SNIFFER ────────────────────────────────────────── -->
+  <section id="sniffer">
+    <div class="head">
+      <h2>API sniffer</h2><span class="rule"></span><span class="cmd">claudetui sniffer</span>
+    </div>
+    <p class="note">A local proxy between Claude Code and the API. Set <code>ANTHROPIC_BASE_URL</code> at it — or use the <code>claudetui sniff</code> launcher, which detects the port — and every request prints as one line.</p>
+
+    <figure>
+      <div class="term">
+        <div class="cap"><span>claudetui sniffer</span><span>output format</span></div>
+        <pre aria-hidden="true"><span class="ln">  <span style="color:#a6e3a1">#1  </span> POST /v1/messages  <span style="color:#94e2d5">opus-5</span>  132.6k<span style="opacity:.62">-&gt;</span>459  <span style="opacity:.62">$0.237</span>  <span style="opacity:.62">25632ms</span>  <span style="opacity:.62">496.1KB/12.5KB</span>  <span style="opacity:.62">100%c</span>  <span style="opacity:.62">[Tt]</span></span>
+<span class="ln">  <span style="color:#a6e3a1">#2  </span> POST /v1/messages  <span style="color:#94e2d5">opus-5</span>  133.1k<span style="opacity:.62">-&gt;</span>422  <span style="opacity:.62">$0.239</span>  <span style="opacity:.62">13451ms</span>  <span style="opacity:.62">498.4KB/22.7KB</span>  <span style="opacity:.62">100%c</span>  <span style="opacity:.62">[U]</span>  <span style="opacity:.62">Agent</span></span>
+<span class="ln">  <span style="color:#a6e3a1">#3  </span> POST /v1/messages  <span style="color:#94e2d5">haiku-4-5</span>  15.4k<span style="opacity:.62">-&gt;</span>258  <span style="opacity:.62">$0.016</span>  <span style="opacity:.62">2018ms</span>  <span style="opacity:.62">56.7KB/9.5KB</span>  <span style="color:#f38ba8">0%c</span>  <span style="opacity:.62">[tUUUU]</span>  <span style="opacity:.62">Read,Read,Read,Read</span>  <span style="color:#94e2d5;font-weight:700">+agent.1</span></span>
+<span class="ln">  <span style="color:#a6e3a1">#4  </span> POST /v1/messages  <span style="color:#94e2d5">opus-5</span>  134.5k<span style="opacity:.62">-&gt;</span>211  <span style="opacity:.62">$0.242</span>  <span style="opacity:.62">16162ms</span>  <span style="opacity:.62">503.3KB/11.6KB</span>  <span style="opacity:.62">99%c</span>  <span style="opacity:.62">[tU]</span>  <span style="opacity:.62">Read</span></span>
+<span class="ln">  <span style="color:#a6e3a1">#5  </span> POST /v1/messages  <span style="color:#94e2d5">opus-5</span>  49.8k<span style="opacity:.62">-&gt;</span>1.1k  <span style="opacity:.62">$0.653</span>  <span style="opacity:.62">26245ms</span>  <span style="opacity:.62">181.9KB/17.0KB</span>  <span style="opacity:.62">42%c</span>  <span style="opacity:.62">[TtU]</span>  <span style="opacity:.62">Read</span>  <span style="color:#f9e2af">compaction</span></span></pre>
+      </div>
+      <figcaption>Per request: tokens in and out, cost, latency, bytes on the wire, cache ratio, content-block types, tool names, and the sub-agent that made the call. Sub-agents are detected by the presence of the <code>Agent</code> tool, since they share the parent's session ID.</figcaption>
+    </figure>
+
+    <dl class="legend">
+      <div><dt>[Tt] [U] [tUUUU]</dt><dd>Content blocks in the response — <span class="inline">T</span> thinking, <span class="inline">t</span> text, <span class="inline">U</span> tool use, <span class="inline">S</span> server tool, <span class="inline">W</span> web search result, <span class="inline">M</span>/<span class="inline">m</span> MCP.</dd></div>
+      <div><dt>100%c  ·  0%c</dt><dd>Cache hit ratio for the request. Red at zero — a cold prompt you're paying full price for.</dd></div>
+      <div><dt>+agent.1</dt><dd>First request from a newly detected sub-agent.</dd></div>
+      <div><dt>compaction</dt><dd>A compaction request, including the ones Claude Code makes without telling you.</dd></div>
+    </dl>
+
+    <p class="note">Requests are logged as JSONL to <code>~/.claude/api-sniffer/</code>, created <code>0600</code>, with API keys redacted unless you pass <code>--no-redact</code>. Each instance writes a port file, so several projects can run their own proxy at once.</p>
+  </section>
+
+  <!-- ── MORE ───────────────────────────────────────────── -->
+  <section id="more">
+    <div class="head"><h2>Also included</h2><span class="rule"></span></div>
+    <div class="rows">
+      <div class="row">
+        <div><h3>Session stats</h3><p class="rc">claudetui stats</p></div>
+        <div>
+          <p>Post-session analytics over the transcripts in <code>~/.claude/projects/</code>.</p>
+          <ul><li>cost breakdown</li><li>token sparkline</li><li>tool usage</li><li>file activity</li><li><code>--days 7</code> multi-session summary</li></ul>
+        </div>
+      </div>
+      <div class="row">
+        <div><h3>Session manager</h3><p class="rc">claudetui sessions list</p></div>
+        <div>
+          <p>Browse, inspect, compare, resume, and export past sessions.</p>
+          <ul><li>list</li><li>show</li><li>resume</li><li>diff two sessions</li><li>export</li></ul>
+        </div>
+      </div>
+      <div class="row">
+        <div><h3>Hooks</h3><p class="rc">installed by claudetui setup</p></div>
+        <div>
+          <p>Three hooks that put project history in front of Claude before it acts.</p>
+          <ul><li>SessionStart — file activity hotspots</li><li>PreToolUse — high-churn warning before an edit</li><li>PostToolUse — reverse dependencies after an edit</li></ul>
+        </div>
+      </div>
+      <div class="row">
+        <div><h3>Slash commands</h3><p class="rc">/tui:session</p></div>
+        <div>
+          <p>In-session reports, generated by Claude from the current transcript.</p>
+          <ul><li><code>/tui:session</code></li><li><code>/tui:cost</code></li><li><code>/tui:perf</code></li><li><code>/tui:context</code></li></ul>
+        </div>
       </div>
     </div>
   </section>
 
-  <!-- Terminal demo -->
-  <section class="terminal-section">
-    <div class="container">
-      <div class="terminal">
-        <div class="terminal-bar">
-          <div class="terminal-dot red"></div>
-          <div class="terminal-dot yellow"></div>
-          <div class="terminal-dot green"></div>
-          <div class="terminal-title">claude — statusline (full mode)</div>
-        </div>
-        <div class="terminal-body">
-<div class="line"> <span class="t-green-dark">0</span><span class="t-green-dim">1</span><span class="t-green">1</span><span class="t-green-dark">0</span><span class="t-green-dim">1</span><span class="t-green-dark">0</span><span class="t-green">0</span> <span class="t-bold t-magenta">Opus 4.6</span> <span class="t-dim">│</span> <span class="t-green">████████░░░░░░░░░░░░</span> <span class="t-cyan">42%</span> <span class="t-cyan">112k</span><span class="t-dim">/</span><span class="t-dim">1.0M</span> <span class="t-dim">│</span> <span class="t-green">~24 turns left</span> <span class="t-dim">│</span> <span class="t-green">▁</span><span class="t-green">▂</span><span class="t-yellow">▃</span><span class="t-yellow">▅</span><span class="t-orange">▆</span><span class="t-orange">▇</span><span class="t-dim">↓</span><span class="t-green">▁</span><span class="t-green">▃</span><span class="t-yellow">▅</span> <span class="t-dim">│</span> <span class="t-yellow">$2.34</span> <span class="t-dim">│</span> 12m <span class="t-dim">│</span> <span class="t-cyan">0</span><span class="t-dim">x compact</span> <span class="t-dim">│</span> <span class="t-dim">#a1b2c3d4</span></div>
-<div class="line"> <span class="t-green-dark">1</span><span class="t-green-dim">0</span><span class="t-green-dark">0</span><span class="t-green">1</span><span class="t-green-dark">0</span><span class="t-green-dim">1</span><span class="t-green">1</span> <span class="t-green">███░░░░░░░░░░░░░░░░░</span> <span class="t-cyan">15%</span> <span class="t-dim">↻ 2h</span> <span class="t-dim">│</span> <span class="t-magenta">main</span> <span class="t-green">+42</span> <span class="t-red">-17</span> <span class="t-dim">│</span> <span class="t-cyan">18</span> <span class="t-dim">turns</span> <span class="t-dim">│</span> <span class="t-cyan">5</span> <span class="t-dim">files</span> <span class="t-dim">│</span> <span class="t-cyan">0</span> <span class="t-dim">err</span> <span class="t-dim">│</span> <span class="t-green">82%</span> <span class="t-dim">cache</span> <span class="t-dim">│</span> <span class="t-cyan">4</span><span class="t-dim">x think</span> <span class="t-dim">│</span> ~<span class="t-yellow">$0.13</span><span class="t-dim">/turn</span></div>
-<div class="line"> <span class="t-green-dim">0</span><span class="t-green">1</span><span class="t-green-dark">1</span><span class="t-green-dim">0</span><span class="t-green-dark">0</span><span class="t-green">1</span><span class="t-green-dark">0</span> <span class="t-yellow">███████████░░░░░░░░</span> <span class="t-yellow">73%</span><span class="t-dim">w</span> <span class="t-dim">↻ 3h</span> <span class="t-dim">│</span> <span class="t-dim">read</span> <span class="t-green">statusline.py</span> <span class="t-dim">→</span> <span class="t-dim">edit</span> <span class="t-green">statusline.py</span> <span class="t-dim">→</span> <span class="t-dim">bash</span> <span class="t-green">python3</span> <span class="t-dim">→</span> <span class="t-dim">edit</span> <span class="t-green">README.md</span> <span class="t-dim">│</span> <span class="t-yellow">statusline.py</span><span class="t-dim">×3</span> <span class="t-yellow">README.md</span><span class="t-dim">×1</span></div>
-        </div>
-      </div>
-    </div>
-  </section>
+  <!-- ── INSTALL ────────────────────────────────────────── -->
+  <section id="install">
+    <div class="head"><h2>Install</h2><span class="rule"></span><span class="cmd">macOS · Linux · WSL 2</span></div>
+    <p class="note">Installing puts the statusline, hooks, and slash commands into <code>~/.claude/settings.json</code> and symlinks <code>claudetui</code> onto your PATH.</p>
 
-  <!-- Features -->
-  <section class="features">
-    <div class="container">
-      <h2>Everything you need to see inside Claude Code</h2>
-      <div class="features-grid">
-        <div class="feature-card">
-          <span class="feature-icon">████████░░░░░░░░ 42%</span>
-          <h3>Statusline</h3>
-          <p>Real-time status bar showing context usage, cost, cache ratio, turn count, git diff, tool trace, and matrix rain animation. Two modes: <code>full</code> (3-line) and <code>compact</code> (1-line).</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">&gt;_ monitor</span>
-          <h3>Live Monitor</h3>
-          <p>Dashboard in a separate terminal with live stats, scrollable log viewer with filters, session browser, settings panel, and export. Auto-detects and follows active sessions.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">$0.00 &rarr; $∞</span>
-          <h3>Session Stats</h3>
-          <p>Post-session analytics with cost breakdown, token usage sparkline, tool usage chart, file activity heatmap, and multi-session summaries.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">ls sessions/*</span>
-          <h3>Session Manager</h3>
-          <p>Browse, search, compare, resume, and export Claude Code sessions. Diff two sessions side-by-side to compare cost, duration, and activity.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">on:edit &rarr; run</span>
-          <h3>Hooks</h3>
-          <p>Automatic context injected into sessions — file activity heatmap on start, reverse dependency warnings after edits, high churn alerts before edits.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">⇄ proxy</span>
-          <h3>API Sniffer</h3>
-          <p>Transparent proxy that intercepts all API calls. See tokens, cost, latency, cache ratio, content block types, sub-agent tracking, and compaction detection in real-time.</p>
-        </div>
-        <div class="feature-card">
-          <span class="feature-icon">/tui:*</span>
-          <h3>Slash Commands</h3>
-          <p>In-session analytics on demand: <code>/tui:session</code> <code>/tui:cost</code> <code>/tui:perf</code> <code>/tui:context</code> for deep reports without leaving Claude Code.</p>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Statusline detail -->
-  <section class="tool-section">
-    <div class="container">
-      <h2>Statusline</h2>
-      <p class="subtitle">Real-time status bar with everything you need at a glance</p>
-      <div class="tool-terminal">
-<div class="line"><span class="t-dim">Full mode (3-line):</span></div>
-<div class="line"> <span class="t-bold t-magenta">Opus 4.6</span> <span class="t-dim">│</span> <span class="t-yellow">████████████░░░░░░░░</span> <span class="t-yellow">78%</span> <span class="t-cyan">755.2k</span><span class="t-dim">/1.0M</span> <span class="t-dim">│</span> <span class="t-yellow">~8 turns left</span> <span class="t-dim">│</span> <span class="t-yellow">$12.47</span> <span class="t-dim">│</span> 2h 10m <span class="t-dim">│</span> <span class="t-cyan">1</span><span class="t-dim">x compact</span></div>
-<div class="line"> <span class="t-green">████░░░░░░░░░░░░░░░░░</span> <span class="t-cyan">15%</span> <span class="t-dim">↻ 2h</span> <span class="t-dim">│</span> <span class="t-magenta">feature/auth</span> <span class="t-green">+120</span> <span class="t-red">-45</span> <span class="t-dim">│</span> <span class="t-cyan">56</span> <span class="t-dim">turns</span> <span class="t-dim">│</span> <span class="t-cyan">12</span> <span class="t-dim">files</span> <span class="t-dim">│</span> <span class="t-green">78%</span> <span class="t-dim">cache</span></div>
-<div class="line"> <span class="t-orange">█████████████░░░░░░░</span> <span class="t-orange">73%</span><span class="t-dim">w</span> <span class="t-dim">↻ 3h</span> <span class="t-dim">│</span> <span class="t-dim">read</span> <span class="t-green">auth.ts</span> <span class="t-dim">→</span> <span class="t-dim">edit</span> <span class="t-green">auth.ts</span> <span class="t-dim">→</span> <span class="t-dim">bash</span> <span class="t-green">npm test</span> <span class="t-dim">│</span> <span class="t-yellow">auth.ts</span><span class="t-dim">×2</span></div>
-<div class="line"></div>
-<div class="line"><span class="t-dim">Compact mode (1-line):</span></div>
-<div class="line"> <span class="t-bold t-magenta">Opus 4.6</span> <span class="t-dim">│</span> <span class="t-yellow">████████████░░░░░░░</span> <span class="t-yellow">78%</span> <span class="t-cyan">755.2k</span><span class="t-dim">/1.0M</span> <span class="t-dim">│</span> <span class="t-yellow">$12.47</span> <span class="t-dim">│</span> 2h 10m <span class="t-dim">│</span> <span class="t-cyan">56</span> <span class="t-dim">turns</span></div>
-      </div>
-      <ul class="feature-list">
-        <li>Context progress bar with compaction-aware colors</li>
-        <li>Auto-detects context window (200k or 1M for Opus 4)</li>
-        <li>Compaction prediction based on 33k buffer model</li>
-        <li>Session cost and cost-per-turn</li>
-        <li>Cache hit ratio</li>
-        <li>Git branch and diff stats</li>
-        <li>Live tool trace with file edit counts</li>
-        <li>Matrix rain animation (context-aware)</li>
-        <li>Pluggable widgets: matrix, hex, bars, progress</li>
-        <li>Thinking block count</li>
-        <li>Sub-agent count</li>
-        <li>Session duration and ID</li>
-        <li>Plan usage bars (session 5-hour + weekly limits)</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- Monitor detail -->
-  <section class="tool-section">
-    <div class="container">
-      <h2>Live Monitor</h2>
-      <p class="subtitle">Full-screen dashboard in a separate terminal — run <code>claudetui monitor</code></p>
-
-      <div class="terminal" style="margin-bottom: 24px;">
-        <div class="terminal-bar">
-          <div class="terminal-dot red"></div>
-          <div class="terminal-dot yellow"></div>
-          <div class="terminal-dot green"></div>
-          <div class="terminal-title">claudetui monitor</div>
-        </div>
-        <div class="terminal-body" style="font-size: 12px; line-height: 1.6;">
-<div class="line"><span class="t-green-dim">10101111010111101011110101111010111101011110101111010111101011110101111010111101</span></div>
-<div class="line"><span class="t-dim">────────────────────────────────────────────────────────────────────────────────</span></div>
-<div class="line">  <span class="t-dim">○</span> <span class="t-bold t-magenta">claude-opus-4-6</span>  <span class="t-dim">│</span>  <span class="t-dim">#a1b2c3d4</span>  <span class="t-dim">│</span>  <span class="t-bright">2h 15m 30s</span>  <span class="t-dim">│</span>  <span class="t-green">ACTIVE</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-bold t-bright">CONTEXT</span></div>
-<div class="line">  <span class="t-yellow">████████████████</span><span class="t-dim">░░░░░░░░░░░░░░░░░░░░░░░░</span>  <span class="t-yellow">40.2%</span>  <span class="t-cyan">402.0k</span><span class="t-dim">/1.0M</span></div>
-<div class="line">  <span class="t-green">▃▃</span><span class="t-yellow">▄▅▅</span><span class="t-orange">▆▇▇▇</span><span class="t-dim">↓↓</span><span class="t-yellow">▄▄▄▅▅▅</span><span class="t-orange">▆▇▇</span><span class="t-dim">↓</span><span class="t-green">▃▃▃</span><span class="t-yellow">▄▄▄▄▅</span><span class="t-orange">▆▆▇▇</span><span class="t-dim">↓</span><span class="t-green">▃</span><span class="t-yellow">▄▄▅</span><span class="t-orange">▆▆▇▇▇</span><span class="t-dim">↓</span><span class="t-green">▃▃</span><span class="t-yellow">▄▄▄▅▅▅▅</span><span class="t-orange">▆▆▆▇▇▇</span><span class="t-dim">↓</span></div>
-<div class="line">  <span class="t-dim">Compactions:</span> <span class="t-cyan">6</span>  <span class="t-dim">│</span>  <span class="t-dim">Turns left:</span> <span class="t-yellow">~5</span>  <span class="t-dim">│</span>  <span class="t-dim">Since compact:</span> <span class="t-cyan">4</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-bold t-bright">COST</span></div>
-<div class="line">  <span class="t-yellow">$248.46</span> <span class="t-dim">total</span>  <span class="t-dim">│</span>  ~<span class="t-yellow">$1.10</span><span class="t-dim">/turn</span>  <span class="t-dim">│</span>  <span class="t-yellow">$0.15</span><span class="t-dim">/min</span>  <span class="t-dim">│</span>  <span class="t-green">$2013.62</span> <span class="t-dim">saved</span></div>
-<div class="line">  <span class="t-dim">Input:</span> <span class="t-cyan">$0.03</span>  <span class="t-dim">│</span>  <span class="t-dim">Cache:</span> <span class="t-cyan">$223.74</span>  <span class="t-dim">│</span>  <span class="t-dim">Output:</span> <span class="t-cyan">$24.69</span></div>
-<div class="line">  <span class="t-magenta">██████████████████████████████████████████████████</span></div>
-<div class="line">  <span class="t-blue">■</span><span class="t-dim">input 0%</span>  <span class="t-magenta">■</span><span class="t-dim">cache 100%</span>  <span class="t-yellow">■</span><span class="t-dim">output 0%</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-bold t-bright">CURRENT</span></div>
-<div class="line">  <span class="t-cyan">3</span> <span class="t-dim">tools</span>  <span class="t-dim">│</span>  <span class="t-dim">Bash:</span><span class="t-cyan">2</span>  <span class="t-dim">Write:</span><span class="t-cyan">1</span></div>
-<div class="line">  <span class="t-dim">bash</span> <span class="t-green">ls</span> <span class="t-dim">→</span> <span class="t-dim">bash</span> <span class="t-green">mkdir</span> <span class="t-dim">→</span> <span class="t-dim">write</span> <span class="t-green">index.html</span> <span class="t-dim">│</span> <span class="t-yellow">index.html</span><span class="t-dim">×1</span></div>
-<div class="line">  <span class="t-green">index.html</span><span class="t-dim">(0r/1e)</span></div>
-<div class="line">  <span class="t-cyan">0</span> <span class="t-dim">errors</span>  <span class="t-dim">│</span>  <span class="t-cyan">1</span> <span class="t-dim">thinking</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-bold t-bright">SESSION</span></div>
-<div class="line">  <span class="t-cyan">226</span> <span class="t-dim">turns</span>  <span class="t-dim">│</span>  <span class="t-cyan">833</span> <span class="t-dim">tools</span>  <span class="t-dim">│</span>  <span class="t-dim">Edit:</span><span class="t-cyan">278</span>  <span class="t-dim">Read:</span><span class="t-cyan">218</span>  <span class="t-dim">Bash:</span><span class="t-cyan">197</span></div>
-<div class="line">  <span class="t-green">monitor.py</span><span class="t-dim">(120r/102e)</span> <span class="t-green">statusline.py</span><span class="t-dim">(87r/79e)</span> <span class="t-green">README.md</span><span class="t-dim">(45r/84e)</span></div>
-<div class="line">  <span class="t-cyan">15</span> <span class="t-dim">errors</span>  <span class="t-dim">│</span>  <span class="t-cyan">59</span> <span class="t-dim">thinking (4%)</span>  <span class="t-dim">│</span>  <span class="t-green">99%</span> <span class="t-dim">cache</span>  <span class="t-dim">│</span>  <span class="t-cyan">3</span> <span class="t-dim">agents</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-bold t-bright">LOG</span></div>
-<div class="line">  <span class="t-dim">14:22:10</span>  <span class="t-dim">grep</span> <span class="t-green">CLAUDE.md</span></div>
-<div class="line">  <span class="t-dim">14:22:45</span>  <span class="t-dim">$</span> git diff --cached --stat</div>
-<div class="line">  <span class="t-dim">14:23:01</span>  <span class="t-dim">$</span> git add README.md install.sh && git commit</div>
-<div class="line">  <span class="t-dim">14:23:15</span>  <span class="t-dim">$</span> git push</div>
-<div class="line">  <span class="t-dim">14:30:22</span>  <span class="t-cyan">⚡</span> compaction #6</div>
-<div class="line">  <span class="t-dim">14:31:50</span>  <span class="t-dim">$</span> ls docs/ && mkdir -p docs</div>
-<div class="line">  <span class="t-dim">14:33:12</span>  <span class="t-dim">write</span> <span class="t-green">index.html</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-dim">────────────────────────────────────────────────────────────────────────────────</span></div>
-<div class="line">  <span class="t-bold t-cyan">s</span><span class="t-dim">tats</span>  <span class="t-bold t-cyan">d</span><span class="t-dim">etails</span>  <span class="t-bold t-cyan">l</span><span class="t-dim">og</span>  <span class="t-bold t-cyan">e</span><span class="t-dim">xport</span>  <span class="t-dim">sessi</span><span class="t-bold t-cyan">o</span><span class="t-dim">ns</span>  <span class="t-bold t-cyan">c</span><span class="t-dim">onfig</span>  <span class="t-bold t-cyan">?</span><span class="t-dim">help</span>  <span class="t-bold t-cyan">q</span><span class="t-dim">uit</span></div>
-        </div>
-      </div>
-
-      <ul class="feature-list">
-        <li>Auto-detects active session</li>
-        <li>Live refresh on transcript changes</li>
-        <li>Matrix rain header (active/idle aware)</li>
-        <li>Turn timer — shows how long Claude is working</li>
-        <li>Context sparkline with compaction markers</li>
-        <li>Cost breakdown with cache savings</li>
-        <li>Per-turn tool trace and file edit counts</li>
-        <li>Session-wide stats and file heatmap</li>
-        <li>Settings panel — compaction, sparkline config</li>
-        <li>Scrollable log viewer with filtering</li>
-        <li>Auto-follow detects new sessions</li>
-        <li>Agent tracking — spawns and completions</li>
-        <li>Vim-style navigation (Ctrl+F/B, g/G)</li>
-        <li>Export session data to markdown</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- Session Stats detail -->
-  <section class="tool-section">
-    <div class="container">
-      <h2>Session Stats</h2>
-      <p class="subtitle">Post-session analytics and multi-session summaries</p>
-      <div class="tool-terminal">
-<div class="line"><span class="t-dim">$</span> <span class="t-bright">claudetui stats</span></div>
-<div class="line"><span class="t-dim">$</span> <span class="t-bright">claudetui stats --days 7 -s</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-bold">Session Summary (6 sessions)</span></div>
-<div class="line">  <span class="t-dim">──────────────────────────────────────────────────────────────────</span></div>
-<div class="line">  <span class="t-dim">ID       Date         Duration     Cost  Turns  Compact Model</span></div>
-<div class="line">  <span class="t-dim">──────────────────────────────────────────────────────────────────</span></div>
-<div class="line">  a1b2c3d4 2026-03-08        45m <span class="t-yellow">$  2.31</span>     34        0 opus 4 6</div>
-<div class="line">  e5f6a7b8 2026-03-07     2h 10m <span class="t-yellow">$ 12.47</span>    156        1 sonnet 4 6</div>
-<div class="line">  c9d0e1f2 2026-03-04        18m <span class="t-yellow">$  0.52</span>     12        0 opus 4 6</div>
-<div class="line">  <span class="t-dim">──────────────────────────────────────────────────────────────────</span></div>
-<div class="line">  <span class="t-bold">Total</span>                  13h 20m <span class="t-yellow">$ 97.79</span></div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Sniffer detail -->
-  <section class="tool-section">
-    <div class="container">
-      <h2>API Sniffer</h2>
-      <p class="subtitle">Intercept every API call between Claude Code and Anthropic — run <code>claudetui sniffer</code></p>
-      <div class="tool-terminal">
-<div class="line"><span class="t-dim">$</span> <span class="t-bright">claudetui sniffer</span>           <span class="t-dim"># Terminal 1: start proxy</span></div>
-<div class="line"><span class="t-dim">$</span> <span class="t-bright">claudetui sniff</span>             <span class="t-dim"># Terminal 2: launch Claude through it</span></div>
-<div class="line"></div>
-<div class="line">  <span class="t-green">#1</span>  POST /v1/messages  <span class="t-cyan">opus-4-6</span>  132.6k<span class="t-dim">-></span>459  <span class="t-dim">$0.237</span>  <span class="t-dim">25632ms</span>  <span class="t-dim">484.5KB/12.2KB</span>  <span class="t-dim">100%c</span>  <span class="t-dim">[Tt]</span></div>
-<div class="line">  <span class="t-green">#2</span>  POST /v1/messages  <span class="t-cyan">opus-4-6</span>  133.1k<span class="t-dim">-></span>422  <span class="t-dim">$0.239</span>  <span class="t-dim">13451ms</span>  <span class="t-dim">486.7KB/22.2KB</span>  <span class="t-dim">100%c</span>  <span class="t-dim">[U]</span>  <span class="t-dim">Agent</span></div>
-<div class="line">  <span class="t-green">#3</span>  POST /v1/messages  <span class="t-cyan">haiku-4-5</span>  15.4k<span class="t-dim">-></span>258  <span class="t-dim">$0.016</span>  <span class="t-dim">2018ms</span>  <span class="t-dim">55.4KB/9.3KB</span>  <span class="t-red">0%c</span>  <span class="t-dim">[tUUUU]</span>  <span class="t-dim">Read,Read,Read,Read</span>  <span class="t-cyan t-bold">+agent.1</span></div>
-<div class="line">  <span class="t-green">#4</span>  POST /v1/messages  <span class="t-cyan">opus-4-6</span>  134.5k<span class="t-dim">-></span>211  <span class="t-dim">$0.242</span>  <span class="t-dim">16162ms</span>  <span class="t-dim">491.5KB/11.3KB</span>  <span class="t-dim">99%c</span>  <span class="t-dim">[tU]</span>  <span class="t-dim">Read</span></div>
-<div class="line">  <span class="t-green">#5</span>  POST /v1/messages  <span class="t-cyan">opus-4-6</span>  49.8k<span class="t-dim">-></span>1.1k  <span class="t-dim">$0.653</span>  <span class="t-dim">26245ms</span>  <span class="t-dim">177.6KB/16.6KB</span>  <span class="t-dim">42%c</span>  <span class="t-dim">[TtU]</span>  <span class="t-dim">Read</span>  <span class="t-yellow">compaction</span></div>
-      </div>
-      <ul class="feature-list">
-        <li>Per-request tokens, cost, latency, cache ratio</li>
-        <li>Content block types (T/t/U/S/W/M/m)</li>
-        <li>Sub-agent detection and tracking</li>
-        <li>Compaction event detection</li>
-        <li>Tool names in stop reason</li>
-        <li>Traffic size (bytes sent/received)</li>
-        <li>Multi-port support for multiple projects</li>
-        <li>JSONL logging with API key redaction</li>
-        <li>Raw system prompts and HTTP headers</li>
-        <li>Hidden compaction API calls</li>
-      </ul>
-    </div>
-  </section>
-
-  <!-- Hooks detail -->
-  <section class="tool-section">
-    <div class="container">
-      <h2>Hooks</h2>
-      <p class="subtitle">Automatic context injected into your sessions</p>
-      <div class="tool-terminal">
-<div class="line"><span class="t-bold">Session start</span> — file activity heatmap:</div>
-<div class="line"><span class="t-cyan">📊</span> File hotspots (last 14 days, 8 sessions):</div>
-<div class="line">  <span class="t-green">███</span> src/config.ts <span class="t-dim">(43e/12r)</span></div>
-<div class="line">  <span class="t-green">▆▆▆</span> src/pages/dashboard/index.vue <span class="t-dim">(39e/8r)</span></div>
-<div class="line">  <span class="t-green">▅▅▅</span> src/locales/en.json <span class="t-dim">(21e/15r)</span></div>
-<div class="line"></div>
-<div class="line"><span class="t-bold">After editing</span> — reverse dependency check:</div>
-<div class="line"><span class="t-yellow">⚠️</span> 4 file(s) depend on validation.ts:</div>
-<div class="line">  <span class="t-dim">→</span> app/composables/useAuth.ts</div>
-<div class="line">  <span class="t-dim">→</span> app/composables/useNotifications.ts</div>
-<div class="line"></div>
-<div class="line"><span class="t-bold">Before editing</span> — high churn warning:</div>
-<div class="line"><span class="t-red">🔥</span> High churn: config.ts edited 43 times across 5 sessions</div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Quick start -->
-  <section class="quickstart">
-    <div class="container">
-      <h2>Quick Start</h2>
-      <div class="quickstart-grid">
-        <div class="quickstart-card">
-          <div class="step">Step 1</div>
-          <h3>Install</h3>
-          <pre><span class="comment"># Homebrew (macOS)</span>
-brew tap slima4/claude-tui &amp;&amp; brew install claude-tui
+    <div class="cols">
+      <div>
+        <pre class="code"><span class="c"># Homebrew</span>
+brew install slima4/claude-tui/claude-tui
 claudetui setup
 
-<span class="comment"># macOS / Linux / WSL</span>
-curl -sSL https://raw.githubusercontent.com/slima4/claude-tui/main/install.sh | bash</pre>
-        </div>
-        <div class="quickstart-card">
-          <div class="step">Step 2</div>
-          <h3>Use Claude Code</h3>
-          <pre><span class="comment"># Statusline and hooks work automatically</span>
-claude
+<span class="c"># or the install script</span>
+curl -sSL https://raw.githubusercontent.com/slima4/claude-tui/main/install.sh | bash
 
-<span class="comment"># Open a second terminal for live monitor</span>
-claudetui monitor</pre>
-        </div>
-        <div class="quickstart-card">
-          <div class="step">Step 3</div>
-          <h3>Explore</h3>
-          <pre><span class="comment"># Inside Claude Code</span>
-/tui:session
-/tui:cost
+<span class="c"># or from a clone</span>
+git clone https://github.com/slima4/claude-tui.git
+./claude-tui/install.sh</pre>
+      </div>
+      <div>
+        <pre class="code"><span class="c"># pin an isolated interpreter</span>
+CLAUDETUI_PYTHON="$(uv python find 3.13)" ./install.sh
 
-<span class="comment"># After a session</span>
-claudetui stats
-claudetui sessions list</pre>
-        </div>
+<span class="c"># install somewhere other than ~/.claude-ui</span>
+INSTALL_DIR="$HOME/tools/claude-tui" ./install.sh
+
+<span class="c"># uninstall</span>
+claudetui uninstall
+brew uninstall claude-tui
+
+<span class="c"># already ran brew uninstall first?</span>
+curl -sSL https://raw.githubusercontent.com/slima4/claude-tui/main/uninstall.sh | bash</pre>
       </div>
     </div>
+    <p class="note">Windows needs <a href="https://learn.microsoft.com/en-us/windows/wsl/install">WSL 2</a> — the tools want a Unix-like environment.</p>
   </section>
 
-  <!-- Uninstall -->
-  <section class="tool-section">
-    <div class="container">
-      <h2>Uninstall</h2>
-      <p class="subtitle">Clean removal of all settings, hooks, and commands</p>
-      <div class="tool-terminal">
-<div class="line"><span class="t-dim"># Homebrew</span></div>
-<div class="line"><span class="t-bright">claudetui uninstall</span></div>
-<div class="line"><span class="t-bright">brew uninstall claude-tui</span></div>
-<div class="line"></div>
-<div class="line"><span class="t-dim"># Already ran brew uninstall first?</span></div>
-<div class="line"><span class="t-bright">curl -sSL https://raw.githubusercontent.com/slima4/claude-tui/main/uninstall.sh | bash</span></div>
-      </div>
-    </div>
-  </section>
+</div>
+</main>
 
-  <!-- Footer -->
-  <footer>
-    <div class="container">
-      <div class="footer-links">
-        <a href="https://github.com/slima4/claude-tui">GitHub</a>
-        <a href="https://github.com/slima4/claude-tui/issues">Issues</a>
-        <a href="https://github.com/slima4/claude-tui/blob/main/LICENSE">MIT License</a>
-      </div>
-      <p>Python 3.13+ &middot; stdlib only &middot; no dependencies</p>
-    </div>
-  </footer>
+<footer>
+  <div class="wrap">
+    <span>ClaudeTUI v0.8.6</span>
+    <a href="https://github.com/slima4/claude-tui">source</a>
+    <a href="https://github.com/slima4/claude-tui/issues">issues</a>
+    <a href="https://github.com/slima4/claude-tui/releases">releases</a>
+    <a href="https://github.com/slima4/claude-tui/blob/main/LICENSE">MIT</a>
+    <span class="sp">Not affiliated with Anthropic.</span>
+  </div>
+</footer>
 
-  <script>
-    function copyInstall(btn) {
-      const cmd = 'brew tap slima4/claude-tui && brew install claude-tui';
-      navigator.clipboard.writeText(cmd).then(() => {
-        btn.textContent = 'copied!';
-        setTimeout(() => btn.textContent = 'copy', 2000);
-      });
-    }
-  </script>
+<script>
+document.querySelectorAll('.copy').forEach(function (btn) {
+  btn.addEventListener('click', function () {
+    // Single source of truth: read the command out of the DOM node it labels.
+    var text = document.getElementById(btn.dataset.copy).textContent;
+    var done = function (state, label) {
+      btn.dataset.state = state;
+      btn.textContent = label;
+      setTimeout(function () { btn.removeAttribute('data-state'); btn.textContent = 'copy'; }, 1800);
+    };
+    if (!navigator.clipboard) { done('fail', 'select it'); return; }
+    navigator.clipboard.writeText(text).then(
+      function () { done('ok', 'copied'); },
+      function () { done('fail', 'select it'); }
+    );
+  });
+});
+</script>
 
 </body>
 </html>
