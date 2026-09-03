@@ -1,143 +1,405 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="viewport" content="width=1200, initial-scale=1">
+<title>ClaudeTUI social card</title>
 <style>
-  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --crust: #11111b;
+    --base: #181825;
+    --panel: #1e1e2e;
+    --surface: #313244;
+    --line: #282838;
+    --overlay: #6c7086;
+    --text: #cdd6f4;
+    --subtext: #a6adc8;
+    --green: #a6e3a1;
+    --teal: #94e2d5;
+    --yellow: #f9e2af;
+    --peach: #fab387;
+    --mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  html,
   body {
-    width: 1280px;
-    height: 640px;
+    width: 1200px;
+    height: 630px;
+    margin: 0;
     overflow: hidden;
-    font-family: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
-    background: #0a0e14;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-    align-items: center;
+  }
+
+  body {
     position: relative;
-  }
-
-  /* scanlines */
-  body::after {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none;
-    background: repeating-linear-gradient(
-      0deg,
-      transparent,
-      transparent 2px,
-      rgba(0, 255, 65, 0.02) 2px,
-      rgba(0, 255, 65, 0.02) 4px
-    );
-  }
-
-  /* subtle grid */
-  body::before {
-    content: '';
-    position: absolute;
-    top: 0; left: 0; right: 0; bottom: 0;
-    pointer-events: none;
+    color: var(--text);
     background:
-      radial-gradient(ellipse at 50% 50%, rgba(0, 255, 65, 0.03) 0%, transparent 70%);
+      radial-gradient(circle at 93% 8%, rgba(148, 226, 213, .09), transparent 26%),
+      radial-gradient(circle at 10% 100%, rgba(166, 227, 161, .06), transparent 32%),
+      var(--crust);
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
   }
 
-  .title-row {
+  body::before {
+    position: absolute;
+    inset: 0;
+    content: "";
+    opacity: .22;
+    background-image:
+      linear-gradient(rgba(49, 50, 68, .48) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(49, 50, 68, .48) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: linear-gradient(90deg, transparent 2%, black 62%, transparent 100%);
+  }
+
+  body::after {
+    position: absolute;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(17, 17, 27, .13) 4px);
+  }
+
+  .frame {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    grid-template-columns: 464px 1fr;
+    grid-template-rows: auto 1fr auto;
+    column-gap: 54px;
+    width: 100%;
+    height: 100%;
+    padding: 48px 54px 42px;
+  }
+
+  .brand {
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 42px;
+  }
+
+  .brand-lockup {
+    display: flex;
+    align-items: center;
+    gap: 13px;
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -.7px;
+  }
+
+  .mark {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    width: 34px;
+    height: 32px;
+    padding: 6px;
+    border: 1px solid var(--surface);
+    border-radius: 7px;
+    background: var(--base);
+  }
+
+  .mark i { display: block; width: 4px; border-radius: 1px 1px 0 0; }
+  .mark i:nth-child(1) { height: 8px; background: var(--green); }
+  .mark i:nth-child(2) { height: 13px; background: var(--teal); }
+  .mark i:nth-child(3) { height: 19px; background: var(--yellow); }
+  .mark i:nth-child(4) { height: 11px; background: var(--peach); }
+
+  .brand-lockup b { color: var(--green); }
+
+  .label {
+    color: var(--overlay);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+  }
+
+  .copy { align-self: center; min-width: 0; }
+
+  .eyebrow {
+    margin-bottom: 20px;
+    color: var(--green);
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: 2.2px;
+  }
+
+  h1 {
+    max-width: 460px;
+    margin: 0;
+    color: var(--text);
+    font-size: 54px;
+    line-height: 1.06;
+    letter-spacing: -3.2px;
+  }
+
+  h1 em { color: var(--green); font-style: normal; }
+
+  .lede {
+    max-width: 430px;
+    margin: 24px 0 0;
+    color: var(--subtext);
+    font-size: 17px;
+    line-height: 1.6;
+    letter-spacing: -.35px;
+  }
+
+  .dashboard {
+    position: relative;
+    align-self: stretch;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--surface);
+    border-radius: 14px;
+    background: linear-gradient(145deg, rgba(30, 30, 46, .98), rgba(24, 24, 37, .98));
+    box-shadow: 0 28px 70px rgba(0, 0, 0, .32), inset 0 1px rgba(255, 255, 255, .025);
+  }
+
+  .dash-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 48px;
+    padding: 0 18px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(17, 17, 27, .45);
+  }
+
+  .dash-title {
+    color: var(--subtext);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 1.4px;
+  }
+
+  .live {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--green);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.3px;
+  }
+
+  .live::before {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--green);
+    box-shadow: 0 0 14px rgba(166, 227, 161, .72);
+    content: "";
+  }
+
+  .dash-body { padding: 24px 24px 20px; }
+
+  .context-top {
     display: flex;
     align-items: baseline;
-    gap: 0;
-    margin-bottom: 12px;
+    justify-content: space-between;
+    margin-bottom: 13px;
   }
 
-  .title {
-    font-size: 72px;
-    font-weight: 700;
-    color: #e8edf3;
-    letter-spacing: -2px;
-  }
-
-  .title span {
-    color: #00ff41;
-  }
-
-  .tagline {
-    font-size: 20px;
-    color: #6b7a8d;
-    margin-bottom: 40px;
-    letter-spacing: 0.5px;
-  }
-
-  .terminal-box {
-    background: #0d1117;
-    border: 1px solid #1e2a3a;
-    border-radius: 10px;
-    padding: 20px 28px;
-    width: 1080px;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
-  }
-
-  .line {
-    white-space: pre;
-    font-size: 15px;
-    line-height: 1.7;
-  }
-
-  .green { color: #00ff41; }
-  .green-dim { color: #03a062; }
-  .green-dark { color: #003b00; }
-  .cyan { color: #56d4dd; }
-  .yellow { color: #f0c040; }
-  .orange { color: #e89040; }
-  .red { color: #f04040; }
-  .magenta { color: #c678dd; }
-  .dim { color: #6b7a8d; }
-  .bright { color: #e8edf3; }
-  .bold { font-weight: 700; }
-
-  .badge {
+  .metric-name {
+    color: var(--overlay);
     font-size: 11px;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: #00ff41;
-    border: 1px solid #03a062;
-    padding: 3px 12px;
-    border-radius: 3px;
-    margin-bottom: 16px;
+    font-weight: 700;
+    letter-spacing: 1.6px;
   }
+
+  .context-value {
+    color: var(--green);
+    font-size: 23px;
+    font-weight: 800;
+  }
+
+  .context-value small {
+    color: var(--overlay);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .bar {
+    display: flex;
+    gap: 4px;
+    height: 23px;
+    margin-bottom: 9px;
+  }
+
+  .bar i { flex: 1; border-radius: 2px; background: var(--surface); }
+  .bar i.on { background: var(--green); }
+  .bar i.edge { background: linear-gradient(180deg, var(--green), var(--teal)); }
+
+  .bar-meta {
+    display: flex;
+    justify-content: space-between;
+    color: var(--overlay);
+    font-size: 11px;
+  }
+
+  .bar-meta b { color: var(--teal); font-weight: 600; }
+
+  .spark-wrap {
+    display: grid;
+    grid-template-columns: 1fr 94px;
+    align-items: end;
+    gap: 16px;
+    height: 98px;
+    margin-top: 20px;
+    padding: 16px 16px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: rgba(17, 17, 27, .34);
+  }
+
+  .spark {
+    display: flex;
+    align-items: flex-end;
+    gap: 5px;
+    height: 51px;
+  }
+
+  .spark i { flex: 1; min-width: 4px; border-radius: 2px 2px 0 0; background: var(--green); }
+  .spark i:nth-child(3n) { background: var(--teal); }
+  .spark i:nth-child(7n) { background: var(--yellow); }
+  .spark i:nth-child(11) { background: var(--peach); }
+
+  .eta { align-self: center; text-align: right; }
+  .eta strong { display: block; color: var(--yellow); font-size: 20px; }
+  .eta span { color: var(--overlay); font-size: 10px; letter-spacing: 1px; }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    margin-top: 18px;
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--line);
+  }
+
+  .metric { padding: 13px 12px 12px; background: var(--base); }
+
+  .metric span {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--overlay);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+  }
+
+  .metric b { color: var(--text); font-size: 17px; }
+  .metric:nth-child(1) b { color: var(--yellow); }
+  .metric:nth-child(2) b { color: var(--green); }
+  .metric:nth-child(3) b { color: var(--teal); }
+
+  .trace {
+    margin-top: 17px;
+    overflow: hidden;
+    color: var(--overlay);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
+  .trace b { color: var(--green); font-weight: 600; }
+  .trace i { color: var(--surface); font-style: normal; }
 
   .footer {
-    position: absolute;
-    bottom: 32px;
+    grid-column: 1 / -1;
     display: flex;
-    gap: 32px;
-    font-size: 14px;
-    color: #6b7a8d;
+    align-items: flex-end;
+    justify-content: space-between;
+    padding-top: 34px;
   }
 
-  .footer span {
-    color: #03a062;
+  .features { display: flex; gap: 10px; }
+
+  .feature {
+    padding: 7px 11px;
+    border: 1px solid var(--line);
+    border-radius: 5px;
+    color: var(--subtext);
+    background: rgba(24, 24, 37, .64);
+    font-size: 11px;
   }
+
+  .runtime { color: var(--overlay); font-size: 11px; }
+  .runtime b { color: var(--teal); font-weight: 600; }
 </style>
 </head>
 <body>
+  <main class="frame">
+    <header class="brand">
+      <div class="brand-lockup">
+        <span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <span>claude<b>tui</b></span>
+      </div>
+      <span class="label">OPEN SOURCE · TERMINAL NATIVE</span>
+    </header>
 
-  <div class="badge">open source</div>
-  <div class="title-row">
-    <div class="title">Claude<span>TUI</span></div>
-  </div>
-  <div class="tagline">Real-time dashboard for Claude Code</div>
+    <section class="copy">
+      <div class="eyebrow">CLAUDE CODE, INSTRUMENTED</div>
+      <h1>See the whole <em>session.</em></h1>
+      <p class="lede">Context, cost, cache, compaction and live tool activity—read straight from the transcript.</p>
+    </section>
 
-  <div class="terminal-box">
-    <div class="line"><span class="green-dark">0</span><span class="green-dim">1</span><span class="green">1</span><span class="green-dark">0</span><span class="green-dim">1</span><span class="green-dark">0</span><span class="green">0</span> <span class="bold magenta">Opus 4.6</span> <span class="dim">|</span> <span class="green">████████</span><span class="dim">░░░░░░░░░░░░</span> <span class="cyan">42%</span> <span class="cyan">65.5k</span><span class="dim">/200.0k</span> <span class="dim">|</span> <span class="green">~24 turns left</span> <span class="dim">|</span> <span class="green">▁</span><span class="green">▂</span><span class="yellow">▃</span><span class="yellow">▅</span><span class="orange">▆</span><span class="orange">▇</span><span class="dim">↓</span><span class="green">▁</span><span class="green">▃</span><span class="yellow">▅</span> <span class="dim">|</span> <span class="yellow">$2.34</span> <span class="dim">|</span> <span class="bright">12m</span> <span class="dim">|</span> <span class="cyan">0</span><span class="dim">x compact</span></div>
-    <div class="line"><span class="green-dark">1</span><span class="green-dim">0</span><span class="green-dark">0</span><span class="green">1</span><span class="green-dark">0</span><span class="green-dim">1</span><span class="green">1</span> <span class="green">my-project</span> <span class="dim">|</span> <span class="magenta">main</span> <span class="green">+42</span> <span class="red">-17</span> <span class="dim">|</span> <span class="cyan">18</span> <span class="dim">turns</span> <span class="dim">|</span> <span class="cyan">5</span> <span class="dim">files</span> <span class="dim">|</span> <span class="cyan">0</span> <span class="dim">err</span> <span class="dim">|</span> <span class="green">82%</span> <span class="dim">cache</span> <span class="dim">|</span> <span class="cyan">4</span><span class="dim">x think</span> <span class="dim">|</span> <span class="dim">~</span><span class="yellow">$0.13</span><span class="dim">/turn</span></div>
-    <div class="line"><span class="green-dim">0</span><span class="green">1</span><span class="green-dark">1</span><span class="green-dim">0</span><span class="green-dark">0</span><span class="green">1</span><span class="green-dark">0</span> <span class="dim">read</span> <span class="green">config.ts</span> <span class="dim">→</span> <span class="dim">edit</span> <span class="green">config.ts</span> <span class="dim">→</span> <span class="dim">bash</span> <span class="green">npm test</span> <span class="dim">→</span> <span class="dim">edit</span> <span class="green">README.md</span> <span class="dim">|</span> <span class="yellow">config.ts</span><span class="dim">×2</span> <span class="yellow">README.md</span><span class="dim">×1</span></div>
-  </div>
+    <section class="dashboard" aria-label="ClaudeTUI session dashboard preview">
+      <div class="dash-head">
+        <span class="dash-title">SESSION / a1b2c3d4</span>
+        <span class="live">LIVE</span>
+      </div>
+      <div class="dash-body">
+        <div class="context-top">
+          <span class="metric-name">CONTEXT</span>
+          <span class="context-value">42% <small>421.3k / 1.0M</small></span>
+        </div>
+        <div class="bar" aria-hidden="true">
+          <i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i>
+          <i class="on"></i><i class="on"></i><i class="edge"></i><i></i><i></i>
+          <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+        </div>
+        <div class="bar-meta"><span>0</span><b>COMPACTION CEILING</b><span>1.0M</span></div>
 
-  <div class="footer">
-    <span>statusline</span> · <span>monitor</span> · <span>stats</span> · <span>hooks</span> · <span>commands</span>
-    <div style="flex: 1"></div>
-    Python 3.13+ · stdlib only · no dependencies
-  </div>
+        <div class="spark-wrap">
+          <div>
+            <div class="metric-name">OUTPUT / TURN</div>
+            <div class="spark" aria-hidden="true">
+              <i style="height:22%"></i><i style="height:34%"></i><i style="height:28%"></i>
+              <i style="height:50%"></i><i style="height:44%"></i><i style="height:70%"></i>
+              <i style="height:54%"></i><i style="height:90%"></i><i style="height:63%"></i>
+              <i style="height:42%"></i><i style="height:100%"></i><i style="height:76%"></i>
+              <i style="height:48%"></i><i style="height:58%"></i><i style="height:37%"></i>
+              <i style="height:66%"></i><i style="height:29%"></i><i style="height:46%"></i>
+            </div>
+          </div>
+          <div class="eta"><strong>13 turns</strong><span>TO COMPACTION</span></div>
+        </div>
 
+        <div class="metrics">
+          <div class="metric"><span>SESSION COST</span><b>$12.47</b></div>
+          <div class="metric"><span>CACHE HIT</span><b>99%</b></div>
+          <div class="metric"><span>EFFICIENCY</span><b>54%</b></div>
+        </div>
+
+        <div class="trace"><span>read</span> <b>auth.ts</b> <i>→</i> <span>edit</span> <b>auth.ts</b> <i>→</i> <span>bash</span> <b>npm test</b> <i>→</i> <span>edit</span> <b>session.ts</b></div>
+      </div>
+    </section>
+
+    <footer class="footer">
+      <div class="features">
+        <span class="feature">statusline</span>
+        <span class="feature">monitor</span>
+        <span class="feature">sniffer</span>
+        <span class="feature">analytics</span>
+      </div>
+      <span class="runtime"><b>Python 3.13+</b> · stdlib only · zero dependencies</span>
+    </footer>
+  </main>
 </body>
 </html>
