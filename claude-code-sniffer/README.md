@@ -57,10 +57,48 @@ claude-sniff() {
 
 All API calls flow through the proxy and are logged to `~/.claude/api-sniffer/`.
 
+## Custom upstream
+
+By default the sniffer forwards to `https://api.anthropic.com`. If you already route Claude Code through a gateway or proxy of your own, point the sniffer at it instead:
+
+```bash
+claudetui sniffer --upstream http://localhost:4000
+claudetui sniffer --upstream https://gateway.corp/anthropic
+```
+
+A base path is honoured — `https://gateway.corp/anthropic` sends `/v1/messages` to `/anthropic/v1/messages`, the same path Claude Code would have used with that base URL. Plain-HTTP upstreams work too.
+
+If `--upstream` is not given, the sniffer falls back to `CLAUDETUI_UPSTREAM`, then to whatever `ANTHROPIC_BASE_URL` is already exported in its shell — so the usual case needs no flags:
+
+```bash
+export ANTHROPIC_BASE_URL=https://gateway.corp/anthropic
+claudetui sniffer     # forwards to the gateway
+claudetui sniff       # launches claude through the sniffer
+```
+
+An inherited `ANTHROPIC_BASE_URL` that points at the sniffer's own port is ignored rather than looped back.
+
+Only the scheme, host, port and base path are used. A URL carrying a query string or inline `user:password@` credentials is rejected rather than quietly truncated.
+
+Two env vars cover gateways that need more:
+
+| Variable | Effect |
+|---|---|
+| `CLAUDETUI_UPSTREAM_TOKEN` | Sends `Authorization: Bearer <token>` upstream, unless the client already sent its own `Authorization` header |
+| `CLAUDETUI_UPSTREAM_INSECURE=1` | Skips upstream TLS verification (same as `--insecure`), for self-signed certificates |
+
+Both apply **only to a custom upstream**. If the sniffer resolves to `https://api.anthropic.com`, they are ignored with a note — so a variable left exported from a gateway session can never disable TLS verification against Anthropic or forward an internal token there. `--insecure` without a custom `--upstream` is an error.
+
+The token is read from the environment rather than a flag so it stays out of shell history and `ps` output. It is redacted from logs like any other credential.
+
+Note that cost figures depend on the model IDs in the response. A gateway that renames or remaps models may report `$0.000` even though tokens and latency are still tracked correctly.
+
 ## Options
 
 ```
 --port PORT     Proxy port (default: 7735)
+--upstream URL  Upstream API base URL (default: https://api.anthropic.com)
+--insecure      Skip upstream TLS verification (self-signed gateways)
 --full          Log complete request/response bodies (warning: large files)
 --no-redact     Include API keys in logs (dangerous)
 --quiet         Suppress terminal output, log only

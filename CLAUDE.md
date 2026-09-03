@@ -83,13 +83,15 @@ API call interceptor proxy. Self-contained single-file script.
 - Entry point: `claude-code-sniffer/sniffer.py`
 - Transparent HTTP proxy using `ANTHROPIC_BASE_URL=http://localhost:PORT`
 - Receives plain HTTP from Claude Code, forwards to `https://api.anthropic.com` over HTTPS
+- Upstream is configurable (`Upstream` / `parse_upstream` in `sniffer.py`): `--upstream URL`, else `CLAUDETUI_UPSTREAM`, else an inherited `ANTHROPIC_BASE_URL`, else the Anthropic default. Handles http/https, non-default ports, and base path prefixes (prefix is prepended to the incoming path). Refuses/ignores an upstream pointing at its own listen port
+- Gateway extras: `CLAUDETUI_UPSTREAM_TOKEN` injects `Authorization: Bearer` when the client sent none; `--insecure` / `CLAUDETUI_UPSTREAM_INSECURE` skips upstream TLS verification. Both apply only to a custom upstream — ignored (env) or fatal (flag) when the upstream is the Anthropic default, so a stale export can't weaken the Anthropic path
 - Captures raw request/response bodies, HTTP headers, latency, SSE streaming events
 - Console shows: tokens, cost, latency, traffic size, cache ratio, content block types, tool names, sub-agents
 - Content block types: `T`=thinking, `t`=text, `U`=tool_use, `S`=server_tool_use, `W`=web_search_tool_result, `M`/`m`=mcp
 - Sub-agent tracking: detects sub-agents by `Agent` tool presence in request tool list (session IDs are shared); groups by model + system_length for labeling
 - Compaction detection: main-session only (sub-agents ignored), per-session-ID to avoid false positives across sessions; triggers on >50% message count drop or >70% body size drop
 - Logs to `~/.claude/api-sniffer/sniffer-{timestamp}.jsonl`
-- CLI: `claudetui sniffer [--port PORT] [--full] [--no-redact] [--quiet]`
+- CLI: `claudetui sniffer [--port PORT] [--upstream URL] [--insecure] [--full] [--no-redact] [--quiet]`
 - Launch helper: `claudetui sniff [--port PORT] [claude args...]` — auto-detects sniffer port, falls back to direct launch
 - Multi-port: each sniffer writes `~/.claude/api-sniffer/.port.{PORT}`, cleaned up on shutdown
 - API keys redacted from logs by default; log files created with `0o600` permissions

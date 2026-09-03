@@ -3,10 +3,16 @@
 
 Usage: python3 claude-code-sniffer/test_sniffer.py -v
 """
+import argparse
+import contextlib
+import http.client
+import io
 import json
 import os
+import ssl
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -14,6 +20,8 @@ from sniffer import (
     _match_pricing, _format_tokens, _format_bytes, _calc_cost,
     _summarize_request, _reassemble_sse, _extract_session_id,
     SessionTracker, CompactionDetector, MODEL_PRICING,
+    parse_upstream, DEFAULT_UPSTREAM, _resolve_upstream,
+    UPSTREAM_ENV, UPSTREAM_TOKEN_ENV, UPSTREAM_INSECURE_ENV,
 )
 
 
@@ -358,6 +366,229 @@ class TestCompactionDetector(unittest.TestCase):
         result = d.check({"message_count": 302, "body_length": 510_000},
                          is_main_session=True, session_id="abc")
         self.assertFalse(result)
+
+
+# ── Upstream ──────────────────────────────────────────────────────
+
+class TestParseUpstream(unittest.TestCase):
+    def test_default(self):
+        up = parse_upstream(None)
+        self.assertEqual(up.scheme, "https")
+        self.assertEqual(up.host, "api.anthropic.com")
+        self.assertEqual(up.port, 443)
+        self.assertEqual(up.prefix, "")
+        self.assertEqual(up.base_url, DEFAULT_UPSTREAM)
+
+    def test_blank_falls_back_to_default(self):
+        self.assertEqual(parse_upstream("   ").base_url, DEFAULT_UPSTREAM)
+
+    def test_plain_http_gateway(self):
+        up = parse_upstream("http://localhost:4000")
+        self.assertEqual(up.scheme, "http")
+        self.assertEqual(up.host, "localhost")
+        self.assertEqual(up.port, 4000)
+        self.assertEqual(up.base_url, "http://localhost:4000")
+
+    def test_default_ports_implied_by_scheme(self):
+        self.assertEqual(parse_upstream("http://gw.corp").port, 80)
+        self.assertEqual(parse_upstream("https://gw.corp").port, 443)
+
+    def test_bare_host_assumes_https(self):
+        up = parse_upstream("gw.corp:8443")
+        self.assertEqual(up.scheme, "https")
+        self.assertEqual(up.host, "gw.corp")
+        self.assertEqual(up.port, 8443)
+
+    def test_base_path_prefix(self):
+        up = parse_upstream("https://gw.corp/anthropic/")
+        self.assertEqual(up.prefix, "/anthropic")
+        self.assertEqual(up.target_path("/v1/messages"), "/anthropic/v1/messages")
+
+    def test_no_prefix_passes_path_through(self):
+        up = parse_upstream("https://gw.corp")
+        self.assertEqual(up.target_path("/v1/messages"), "/v1/messages")
+
+    def test_rejects_bad_scheme(self):
+        with self.assertRaises(ValueError):
+            parse_upstream("ftp://gw.corp")
+
+    def test_rejects_missing_host(self):
+        with self.assertRaises(ValueError):
+            parse_upstream("https:///v1")
+
+    def test_rejects_query_string(self):
+        # Silently dropping it would surface as an opaque upstream 401/404
+        with self.assertRaises(ValueError):
+            parse_upstream("https://gw.corp/v1?api-version=2024-01")
+
+    def test_rejects_fragment(self):
+        with self.assertRaises(ValueError):
+            parse_upstream("https://gw.corp/v1#frag")
+
+    def test_rejects_inline_credentials(self):
+        with self.assertRaises(ValueError):
+            parse_upstream("https://user:tok@gw.corp")
+
+    def test_token_and_insecure_carried(self):
+        up = parse_upstream("https://gw.corp", insecure=True, token="tok")
+        self.assertTrue(up.insecure)
+        self.assertEqual(up.token, "tok")
+
+
+class TestUpstreamNetloc(unittest.TestCase):
+    def test_omits_default_port(self):
+        self.assertEqual(parse_upstream("https://gw.corp:443").netloc, "gw.corp")
+        self.assertEqual(parse_upstream("http://gw.corp:80").netloc, "gw.corp")
+
+    def test_keeps_non_default_port(self):
+        self.assertEqual(parse_upstream("http://localhost:4000").netloc,
+                         "localhost:4000")
+
+    def test_ipv6_bracketed(self):
+        up = parse_upstream("http://[::1]:4000")
+        self.assertEqual(up.host, "::1")
+        self.assertEqual(up.netloc, "[::1]:4000")
+
+
+class TestUpstreamLoopGuard(unittest.TestCase):
+    def test_same_loopback_port_is_self(self):
+        self.assertTrue(parse_upstream("http://localhost:7735").points_at_port(7735))
+        self.assertTrue(parse_upstream("http://127.0.0.1:7735").points_at_port(7735))
+        self.assertTrue(parse_upstream("http://127.0.0.2:7735").points_at_port(7735))
+
+    def test_other_port_is_not_self(self):
+        self.assertFalse(parse_upstream("http://localhost:4000").points_at_port(7735))
+
+    def test_remote_host_is_not_self(self):
+        self.assertFalse(parse_upstream("https://gw.corp:7735").points_at_port(7735))
+
+
+class TestUpstreamConnect(unittest.TestCase):
+    def test_https_scheme_uses_tls_connection(self):
+        conn = parse_upstream("https://gw.corp").connect()
+        self.assertIsInstance(conn, http.client.HTTPSConnection)
+        self.assertEqual(conn.port, 443)
+
+    def test_http_scheme_uses_plain_connection(self):
+        conn = parse_upstream("http://localhost:4000").connect()
+        self.assertIsInstance(conn, http.client.HTTPConnection)
+        self.assertNotIsInstance(conn, http.client.HTTPSConnection)
+        self.assertEqual(conn.port, 4000)
+
+    def test_insecure_disables_verification(self):
+        conn = parse_upstream("https://gw.corp", insecure=True).connect()
+        self.assertEqual(conn._context.verify_mode, ssl.CERT_NONE)
+        self.assertFalse(conn._context.check_hostname)
+
+
+class TestResolveUpstream(unittest.TestCase):
+    """Source precedence and the gateway-only knobs."""
+
+    GATEWAY = "http://localhost:4000"
+
+    def resolve(self, env=None, upstream=None, insecure=False, port=7735):
+        args = argparse.Namespace(upstream=upstream, insecure=insecure, port=port)
+        buf = io.StringIO()
+        with mock.patch.dict(os.environ, env or {}, clear=True):
+            with contextlib.redirect_stdout(buf):
+                result = _resolve_upstream(args)
+        return result, buf.getvalue()
+
+    def expect_exit(self, env=None, **kw):
+        with self.assertRaises(SystemExit) as cm:
+            self.resolve(env, **kw)
+        return cm.exception.code
+
+    # ── source precedence
+
+    def test_default_when_nothing_set(self):
+        (up, src, _), _out = self.resolve()
+        self.assertEqual(up.base_url, DEFAULT_UPSTREAM)
+        self.assertEqual(src, "")
+
+    def test_flag_beats_env(self):
+        (up, src, _), _out = self.resolve(
+            {UPSTREAM_ENV: "https://env.example",
+             "ANTHROPIC_BASE_URL": "https://inherited.example"},
+            upstream=self.GATEWAY)
+        self.assertEqual(up.base_url, self.GATEWAY)
+        self.assertEqual(src, "--upstream")
+
+    def test_own_env_beats_inherited_base_url(self):
+        (up, src, _), _out = self.resolve(
+            {UPSTREAM_ENV: self.GATEWAY,
+             "ANTHROPIC_BASE_URL": "https://inherited.example"})
+        self.assertEqual(up.base_url, self.GATEWAY)
+        self.assertEqual(src, UPSTREAM_ENV)
+
+    def test_inherits_anthropic_base_url(self):
+        (up, src, _), _out = self.resolve({"ANTHROPIC_BASE_URL": self.GATEWAY})
+        self.assertEqual(up.base_url, self.GATEWAY)
+        self.assertEqual(src, "ANTHROPIC_BASE_URL")
+
+    # ── loop guard
+
+    def test_self_pointing_inherited_url_falls_back_to_default(self):
+        (up, src, notes), _out = self.resolve(
+            {"ANTHROPIC_BASE_URL": "http://localhost:7735"})
+        self.assertEqual(up.base_url, DEFAULT_UPSTREAM)
+        self.assertEqual(src, "")
+        self.assertTrue(any("Ignoring ANTHROPIC_BASE_URL" in n for n in notes))
+
+    def test_self_pointing_flag_exits(self):
+        self.assertEqual(self.expect_exit(upstream="http://127.0.0.1:7735"), 1)
+
+    def test_invalid_upstream_exits(self):
+        self.assertEqual(self.expect_exit(upstream="ftp://gw.corp"), 1)
+
+    # ── gateway-only knobs must not touch the Anthropic default
+
+    def test_insecure_env_ignored_for_default_upstream(self):
+        (up, _src, notes), _out = self.resolve({UPSTREAM_INSECURE_ENV: "1"})
+        self.assertFalse(up.insecure)
+        self.assertTrue(any(UPSTREAM_INSECURE_ENV in n for n in notes))
+
+    def test_token_env_ignored_for_default_upstream(self):
+        (up, _src, notes), _out = self.resolve({UPSTREAM_TOKEN_ENV: "internal-tok"})
+        self.assertIsNone(up.token)
+        self.assertTrue(any(UPSTREAM_TOKEN_ENV in n for n in notes))
+
+    def test_knobs_ignored_when_self_pointing_url_falls_back(self):
+        (up, _src, _notes), _out = self.resolve(
+            {"ANTHROPIC_BASE_URL": "http://localhost:7735",
+             UPSTREAM_TOKEN_ENV: "internal-tok",
+             UPSTREAM_INSECURE_ENV: "1"})
+        self.assertEqual(up.base_url, DEFAULT_UPSTREAM)
+        self.assertIsNone(up.token)
+        self.assertFalse(up.insecure)
+
+    def test_insecure_flag_against_default_upstream_exits(self):
+        self.assertEqual(self.expect_exit(insecure=True), 1)
+
+    def test_explicit_anthropic_upstream_still_counts_as_default(self):
+        (up, _src, _notes), _out = self.resolve(
+            {UPSTREAM_TOKEN_ENV: "internal-tok"}, upstream=DEFAULT_UPSTREAM)
+        self.assertIsNone(up.token)
+
+    # ── gateway upstream does get them
+
+    def test_knobs_apply_to_custom_upstream(self):
+        (up, _src, notes), _out = self.resolve(
+            {UPSTREAM_TOKEN_ENV: "gw-tok", UPSTREAM_INSECURE_ENV: "1"},
+            upstream="https://gw.corp")
+        self.assertEqual(up.token, "gw-tok")
+        self.assertTrue(up.insecure)
+        self.assertTrue(any("TLS verification disabled" in n for n in notes))
+
+    def test_insecure_flag_applies_to_custom_upstream(self):
+        (up, _src, _notes), _out = self.resolve(upstream="https://gw.corp",
+                                                insecure=True)
+        self.assertTrue(up.insecure)
+
+    def test_insecure_env_needs_a_truthy_value(self):
+        (up, _src, _notes), _out = self.resolve(
+            {UPSTREAM_INSECURE_ENV: "0"}, upstream="https://gw.corp")
+        self.assertFalse(up.insecure)
 
 
 if __name__ == "__main__":

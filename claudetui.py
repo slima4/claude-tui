@@ -4,6 +4,7 @@
 import os
 import subprocess
 import sys
+import urllib.parse
 
 _FALLBACK_VERSION = "0.8.7"
 
@@ -131,6 +132,30 @@ Examples:
 """
 
 
+def _sniffer_ports(port_dir):
+    """Ports of the sniffers currently running, from their .port.{PORT} files."""
+    try:
+        return {f.split(".", 2)[2] for f in os.listdir(port_dir)
+                if f.startswith(".port.")}
+    except FileNotFoundError:
+        return set()
+
+
+def _is_sniffer_url(url, port_dir):
+    """True when a base URL points at a sniffer running on this machine.
+
+    Checked against the port files rather than the hostname alone — a local
+    gateway (LiteLLM on localhost:4000) is not a sniffer.
+    """
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host, port = (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return False
+    is_local = host in ("localhost", "0.0.0.0", "::", "::1") or host.startswith("127.")
+    return is_local and port is not None and str(port) in _sniffer_ports(port_dir)
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(HELP)
@@ -190,17 +215,11 @@ def main():
                 sniff_port = None
         else:
             # Auto-detect: find any running sniffer
-            try:
-                port_files = sorted(
-                    f for f in os.listdir(port_dir) if f.startswith(".port.")
-                )
-            except FileNotFoundError:
-                port_files = []
+            ports = sorted(_sniffer_ports(port_dir))
 
-            if len(port_files) == 1:
-                sniff_port = port_files[0].split(".", 2)[2]
-            elif len(port_files) > 1:
-                ports = [f.split(".", 2)[2] for f in port_files]
+            if len(ports) == 1:
+                sniff_port = ports[0]
+            elif len(ports) > 1:
                 print(f"  Multiple sniffers running: {', '.join(ports)}")
                 print(f"  Use: claudetui sniff --port <port> [claude args...]")
                 sys.exit(1)
@@ -208,8 +227,18 @@ def main():
                 print("  Sniffer not running — starting claude without proxy")
 
         if sniff_port:
+            # A pre-existing base URL is about to be replaced by the proxy's.
+            # The sniffer only forwards there if it was started with it visible.
+            prev_base = os.environ.get("ANTHROPIC_BASE_URL", "").strip()
+            if prev_base and not _is_sniffer_url(prev_base, port_dir):
+                print(f"  Note: ANTHROPIC_BASE_URL={prev_base} is being replaced")
+                print("        If the sniffer was not started with that URL in its")
+                print("        environment, restart it with:")
+                print(f"        claudetui sniffer --port {sniff_port} --upstream {prev_base}")
             os.environ["ANTHROPIC_BASE_URL"] = f"http://localhost:{sniff_port}"
             print(f"  Routing through sniffer on port {sniff_port}")
+        # execvp replaces this process — anything still buffered would be lost
+        sys.stdout.flush()
         os.execvp("claude", ["claude"] + claude_args)
 
     if cmd not in SUBCOMMANDS:

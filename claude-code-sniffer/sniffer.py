@@ -2,7 +2,7 @@
 """ClaudeTUI API Sniffer — intercept and log Claude Code API calls.
 
 A transparent HTTP proxy that captures all API requests/responses between
-Claude Code and Anthropic's servers. Uses ANTHROPIC_BASE_URL to redirect
+Claude Code and the API it talks to. Uses ANTHROPIC_BASE_URL to redirect
 traffic through localhost — no TLS interception or certificates needed.
 
 Usage:
@@ -10,6 +10,7 @@ Usage:
     claudetui sniffer --port 8080      # custom port
     claudetui sniffer --full           # log complete request/response bodies
     claudetui sniffer --quiet          # no terminal output, log only
+    claudetui sniffer --upstream URL   # forward to a gateway instead of Anthropic
 """
 
 import argparse
@@ -23,6 +24,7 @@ import ssl
 import sys
 import threading
 import time
+import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,8 +32,10 @@ from claude_tui_core.models import MODEL_PRICING, get_model_pricing_fuzzy as _ma
 
 # ── Constants ────────────────────────────────────────────────────────
 
-UPSTREAM_HOST = "api.anthropic.com"
-UPSTREAM_PORT = 443
+DEFAULT_UPSTREAM = "https://api.anthropic.com"
+UPSTREAM_ENV = "CLAUDETUI_UPSTREAM"
+UPSTREAM_TOKEN_ENV = "CLAUDETUI_UPSTREAM_TOKEN"
+UPSTREAM_INSECURE_ENV = "CLAUDETUI_UPSTREAM_INSECURE"
 DEFAULT_PORT = 7735
 LOG_DIR = Path.home() / ".claude" / "api-sniffer"
 PORT_DIR = LOG_DIR  # port files stored as .port.{PORT}
@@ -62,6 +66,104 @@ LOGO_LINES = [
 
 # Shared SSL context — reused across all requests (avoids reloading CA bundle)
 _SSL_CTX = ssl.create_default_context()
+
+# Built lazily — only needed when --insecure is active
+_SSL_CTX_INSECURE = None
+
+# Hosts that resolve back to this machine, for the self-forwarding loop guard
+_LOOPBACK_HOSTS = {"localhost", "0.0.0.0", "::", "::1"}
+
+
+def _insecure_ssl_context():
+    """SSL context with verification disabled — for self-signed gateways."""
+    global _SSL_CTX_INSECURE
+    if _SSL_CTX_INSECURE is None:
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        _SSL_CTX_INSECURE = ctx
+    return _SSL_CTX_INSECURE
+
+
+# ── Upstream target ──────────────────────────────────────────────────
+
+class Upstream:
+    """Where the proxy forwards requests — Anthropic by default, or a gateway."""
+
+    __slots__ = ("scheme", "host", "port", "prefix", "insecure", "token")
+
+    def __init__(self, scheme, host, port, prefix="", insecure=False, token=None):
+        self.scheme = scheme
+        self.host = host
+        self.port = port
+        self.prefix = prefix
+        self.insecure = insecure
+        self.token = token
+
+    @property
+    def default_port(self):
+        return self.port == (443 if self.scheme == "https" else 80)
+
+    @property
+    def netloc(self):
+        """Host[:port] for the Host header — port omitted when it's the default."""
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        return host if self.default_port else f"{host}:{self.port}"
+
+    @property
+    def base_url(self):
+        return f"{self.scheme}://{self.netloc}{self.prefix}"
+
+    def target_path(self, path):
+        """Prepend the upstream's base path to an incoming request path.
+
+        Gateways often live under a prefix ("https://gw.corp/anthropic"), so the
+        path Claude Code would have sent there is prefix + path.
+        """
+        return self.prefix + path if self.prefix else path
+
+    def connect(self, timeout=300):
+        host = f"[{self.host}]" if ":" in self.host else self.host
+        if self.scheme == "https":
+            ctx = _insecure_ssl_context() if self.insecure else _SSL_CTX
+            return http.client.HTTPSConnection(host, self.port, context=ctx,
+                                               timeout=timeout)
+        return http.client.HTTPConnection(host, self.port, timeout=timeout)
+
+    def points_at_port(self, port):
+        """True when forwarding here would loop back into a local listener."""
+        host = self.host.lower()
+        is_local = host in _LOOPBACK_HOSTS or host.startswith("127.")
+        return is_local and self.port == port
+
+    def __repr__(self):
+        return f"<Upstream {self.base_url}>"
+
+
+def parse_upstream(url, insecure=False, token=None):
+    """Parse an upstream base URL into an Upstream.
+
+    Accepts a full URL, a bare host ("gw.corp:8080", https assumed), and an
+    optional base path prefix. Parts that would be silently dropped — a query
+    string, a fragment, inline credentials — are rejected instead.
+    """
+    raw = (url or "").strip() or DEFAULT_UPSTREAM
+    if "://" not in raw:
+        raw = "https://" + raw
+    parts = urllib.parse.urlsplit(raw)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError(f"unsupported scheme {parts.scheme!r} — use http or https")
+    if not parts.hostname:
+        raise ValueError(f"no host in {raw!r}")
+    if parts.query or parts.fragment:
+        raise ValueError("a query string or fragment is not supported — "
+                         "give only scheme, host and base path")
+    if parts.username or parts.password:
+        raise ValueError(f"credentials in the URL are not supported — "
+                         f"use {UPSTREAM_TOKEN_ENV}")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    return Upstream(parts.scheme, parts.hostname, port, parts.path.rstrip("/"),
+                    insecure=insecure, token=token)
 
 
 def _format_tokens(n):
@@ -290,7 +392,7 @@ class CompactionDetector:
 # ── Sniffer Handler ──────────────────────────────────────────────────
 
 class SnifferHandler(http.server.BaseHTTPRequestHandler):
-    """HTTP handler that forwards requests to Anthropic API and logs them."""
+    """HTTP handler that forwards requests to the upstream API and logs them."""
 
     def do_POST(self):
         self._forward()
@@ -350,20 +452,25 @@ class SnifferHandler(http.server.BaseHTTPRequestHandler):
         # Forward to upstream
         conn = None
         try:
-            conn = http.client.HTTPSConnection(
-                UPSTREAM_HOST, UPSTREAM_PORT,
-                context=_SSL_CTX,
-                timeout=300,
-            )
+            upstream = self.server.upstream
+            conn = upstream.connect()
             fwd_headers = {}
+            has_auth = False
             for key, val in self.headers.items():
                 lk = key.lower()
-                if lk not in ("host", "transfer-encoding", "accept-encoding"):
-                    fwd_headers[key] = val
-            fwd_headers["Host"] = UPSTREAM_HOST
+                if lk in ("host", "transfer-encoding", "accept-encoding"):
+                    continue
+                if lk == "authorization":
+                    has_auth = True
+                fwd_headers[key] = val
+            fwd_headers["Host"] = upstream.netloc
             fwd_headers["Accept-Encoding"] = "identity"
+            # Gateway token — only fills in when the client sent no bearer of its own
+            if upstream.token and not has_auth:
+                fwd_headers["Authorization"] = f"Bearer {upstream.token}"
 
-            conn.request(self.command, self.path, body=body, headers=fwd_headers)
+            conn.request(self.command, upstream.target_path(self.path),
+                         body=body, headers=fwd_headers)
             resp = conn.getresponse()
         except Exception as e:
             if conn:
@@ -526,10 +633,11 @@ class SnifferServer(http.server.ThreadingHTTPServer):
     allow_reuse_address = True
 
     def __init__(self, port, log_path, full_bodies=False, redact_keys=True,
-                 quiet=False):
+                 quiet=False, upstream=None):
         super().__init__(("127.0.0.1", port), SnifferHandler)
         self.port = port
         self.log_path = log_path
+        self.upstream = upstream or parse_upstream(None)
         self.full_bodies = full_bodies
         self.redact_keys = redact_keys
         self.quiet = quiet
@@ -677,6 +785,76 @@ class SnifferServer(http.server.ThreadingHTTPServer):
 
 # ── Main ─────────────────────────────────────────────────────────────
 
+def _env_flag(name):
+    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes", "on")
+
+
+def _resolve_upstream(args):
+    """Pick the upstream from --upstream / env / default, in that order.
+
+    Returns (upstream, source_label, notes). Exits on an unusable upstream.
+    """
+    if args.upstream:
+        url, src = args.upstream, "--upstream"
+    elif os.environ.get(UPSTREAM_ENV):
+        url, src = os.environ[UPSTREAM_ENV], UPSTREAM_ENV
+    elif os.environ.get("ANTHROPIC_BASE_URL"):
+        # Inherited from the shell — sniff a gateway with no extra flags
+        url, src = os.environ["ANTHROPIC_BASE_URL"], "ANTHROPIC_BASE_URL"
+    else:
+        url, src = None, ""
+
+    try:
+        upstream = parse_upstream(url)
+    except ValueError as e:
+        origin = src or "default"
+        print(f"  {RED}Invalid upstream ({origin}): {e}{RESET}")
+        sys.exit(1)
+
+    notes = []
+
+    # Forwarding to our own listen port would bounce every request back here
+    if upstream.points_at_port(args.port):
+        if src == "ANTHROPIC_BASE_URL":
+            notes.append(f"  {DIM}Ignoring ANTHROPIC_BASE_URL={url} "
+                         f"— points at this sniffer{RESET}")
+            upstream = parse_upstream(None)
+            src = ""
+        else:
+            print(f"  {RED}Upstream {upstream.base_url} points at this sniffer "
+                  f"— requests would loop.{RESET}")
+            sys.exit(1)
+
+    # Gateway-only knobs. They never apply to Anthropic: an exported
+    # CLAUDETUI_UPSTREAM_* left over from a gateway session must not disable TLS
+    # checks on, or leak an internal token to, api.anthropic.com.
+    insecure = args.insecure or _env_flag(UPSTREAM_INSECURE_ENV)
+    token = os.environ.get(UPSTREAM_TOKEN_ENV) or None
+
+    if upstream.base_url == DEFAULT_UPSTREAM:
+        if args.insecure:
+            print(f"  {RED}--insecure applies to a custom --upstream only, "
+                  f"not to {DEFAULT_UPSTREAM}.{RESET}")
+            sys.exit(1)
+        ignored = []
+        if insecure:
+            ignored.append(UPSTREAM_INSECURE_ENV)
+        if token:
+            ignored.append(UPSTREAM_TOKEN_ENV)
+        if ignored:
+            notes.append(f"  {DIM}Ignoring {' and '.join(ignored)} "
+                         f"— upstream is {DEFAULT_UPSTREAM}{RESET}")
+    else:
+        upstream.insecure = insecure
+        upstream.token = token
+        if insecure and upstream.scheme == "https":
+            notes.append(f"  {YELLOW}TLS verification disabled for the upstream{RESET}")
+        if token:
+            notes.append(f"  {DIM}Injecting bearer token from {UPSTREAM_TOKEN_ENV}{RESET}")
+
+    return upstream, src, notes
+
+
 def main():
     parser = argparse.ArgumentParser(
         prog="claudetui sniffer",
@@ -690,7 +868,14 @@ def main():
                         help="Don't redact API keys from logs")
     parser.add_argument("--quiet", action="store_true",
                         help="Suppress terminal output")
+    parser.add_argument("--upstream", metavar="URL",
+                        help=f"Upstream API base URL (default: {DEFAULT_UPSTREAM}; "
+                             f"env: {UPSTREAM_ENV}, else ANTHROPIC_BASE_URL)")
+    parser.add_argument("--insecure", action="store_true",
+                        help="Skip TLS verification for the upstream (self-signed gateways)")
     args = parser.parse_args()
+
+    upstream, upstream_src, notes = _resolve_upstream(args)
 
     # Create log directory
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -710,6 +895,7 @@ def main():
             full_bodies=args.full,
             redact_keys=not args.no_redact,
             quiet=args.quiet,
+            upstream=upstream,
         )
     except OSError as e:
         if e.errno == errno.EADDRINUSE:
@@ -731,7 +917,14 @@ def main():
         print()
         print(f"  {BOLD}API Sniffer{RESET} {DIM}— listening on "
               f"http://127.0.0.1:{args.port}{RESET}")
+        if upstream.base_url != DEFAULT_UPSTREAM:
+            src = f" {DIM}(via {upstream_src}){RESET}" if upstream_src else ""
+            print(f"  {DIM}forwarding to{RESET} {CYAN}{upstream.base_url}{RESET}{src}")
         print()
+        for note in notes:
+            print(note)
+        if notes:
+            print()
         print(f"  {BOLD}Use:{RESET}  "
               f"{CYAN}ANTHROPIC_BASE_URL=http://localhost:{args.port} claude{RESET}")
         print(f"  {BOLD}Log:{RESET}  {DIM}{log_path}{RESET}")
