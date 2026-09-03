@@ -135,6 +135,9 @@ PYTHONPATH=. python3 claude-code-statusline/test_statusline.py -v # statusline: 
 PYTHONPATH=. python3 test_claudetui.py -v                        # dispatcher: version detection, sniffer discovery
 ```
 
+`tests.yml` runs all four suites plus the syntax check on every push to main
+and every PR, on Linux and macOS.
+
 Quick syntax check for all tools:
 ```bash
 python3 -c "import py_compile; [py_compile.compile(f, doraise=True) for f in ['claude-code-statusline/statusline.py', 'claude-code-monitor/lib.py', 'claude-code-monitor/monitor.py', 'claude-code-monitor/chart.py', 'claude-code-sniffer/sniffer.py', 'claude-code-commands/tui/lib.py', 'claudetui.py']]"

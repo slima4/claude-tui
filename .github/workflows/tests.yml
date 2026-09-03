@@ -1,0 +1,68 @@
+name: Tests
+
+# Runs the four unittest suites and the syntax check from CLAUDE.md.
+#
+# Until this existed nothing ran them automatically, which is how the
+# _get_version bug (an installed copy adopting the version of whatever
+# repository contained it) survived several releases. Suites are stdlib-only
+# and hermetic — no network, no TTY — so they need no services or fixtures.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # The floor the project targets; the tools are stdlib-only, so
+          # nothing else needs installing.
+          python-version: "3.13"
+
+      # Every suite runs even after one fails, so a red build reports all of
+      # the breakage rather than only the first suite to trip.
+      - name: monitor
+        if: ${{ !cancelled() }}
+        run: PYTHONPATH=. python3 claude-code-monitor/test_monitor.py -v
+
+      - name: sniffer
+        if: ${{ !cancelled() }}
+        run: PYTHONPATH=. python3 claude-code-sniffer/test_sniffer.py -v
+
+      - name: statusline
+        if: ${{ !cancelled() }}
+        run: PYTHONPATH=. python3 claude-code-statusline/test_statusline.py -v
+
+      - name: dispatcher
+        if: ${{ !cancelled() }}
+        run: PYTHONPATH=. python3 test_claudetui.py -v
+
+      - name: syntax check
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -c "import py_compile; [py_compile.compile(f, doraise=True) for f in [
+            'claude-code-statusline/statusline.py',
+            'claude-code-monitor/lib.py',
+            'claude-code-monitor/monitor.py',
+            'claude-code-monitor/chart.py',
+            'claude-code-sniffer/sniffer.py',
+            'claude-code-commands/tui/lib.py',
+            'claudetui.py',
+          ]]"
