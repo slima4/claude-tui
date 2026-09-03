@@ -11,11 +11,18 @@ _FALLBACK_VERSION = "0.8.8"
 
 def _get_version():
     """Get version from git tag (clone/dev), fall back to hardcoded (curl/brew)."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    # Only trust git when this file sits in its own checkout. `git describe`
+    # otherwise walks up out of an installed libexec into whatever repository
+    # happens to contain it — under Homebrew that is /opt/homebrew, so every
+    # brew install reported Homebrew's own version instead of ours.
+    if not os.path.exists(os.path.join(here, ".git")):
+        return _FALLBACK_VERSION
     try:
         v = (
             subprocess.check_output(
                 ["git", "describe", "--tags", "--abbrev=0"],
-                cwd=os.path.dirname(os.path.abspath(__file__)),
+                cwd=here,
                 stderr=subprocess.DEVNULL,
             )
             .decode()

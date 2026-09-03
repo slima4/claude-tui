@@ -132,6 +132,7 @@ Run from the repo root with `PYTHONPATH=.` so the suites can import the shared
 PYTHONPATH=. python3 claude-code-monitor/test_monitor.py -v      # monitor: parsing, waste model, chart
 PYTHONPATH=. python3 claude-code-sniffer/test_sniffer.py -v      # sniffer: formatters, SSE, session tracker, compaction
 PYTHONPATH=. python3 claude-code-statusline/test_statusline.py -v # statusline: input parsing, rendering, context limits
+PYTHONPATH=. python3 test_claudetui.py -v                        # dispatcher: version detection, sniffer discovery
 ```
 
 Quick syntax check for all tools:
