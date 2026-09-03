@@ -6,7 +6,7 @@ import subprocess
 import sys
 import urllib.parse
 
-_FALLBACK_VERSION = "0.8.8"
+_FALLBACK_VERSION = "0.8.9"
 
 
 def _get_version():
