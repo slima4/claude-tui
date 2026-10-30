@@ -344,7 +344,10 @@ mkdir -p "$BIN_DIR"
 # Primary CLI command
 cat > "$BIN_DIR/claudetui" << EOF
 #!/usr/bin/env bash
-exec env -u PYTHONHOME -u PYTHONPATH "$PYTHON_ABS" "$INSTALL_DIR/claudetui.py" "\$@"
+# An inherited PYTHONHOME/PYTHONPATH is never meant for this interpreter, so it
+# runs without them. The originals ride along for \`claudetui sniff\`, which
+# hands them back to claude.
+exec env -u PYTHONHOME -u PYTHONPATH CLAUDETUI_ORIG_PYTHONHOME="\${PYTHONHOME-}" CLAUDETUI_ORIG_PYTHONPATH="\${PYTHONPATH-}" "$PYTHON_ABS" "$INSTALL_DIR/claudetui.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/claudetui"
 ok "claudetui"
