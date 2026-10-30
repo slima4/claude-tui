@@ -344,7 +344,7 @@ mkdir -p "$BIN_DIR"
 # Primary CLI command
 cat > "$BIN_DIR/claudetui" << EOF
 #!/usr/bin/env bash
-exec "$PYTHON_ABS" "$INSTALL_DIR/claudetui.py" "\$@"
+exec env -u PYTHONHOME -u PYTHONPATH "$PYTHON_ABS" "$INSTALL_DIR/claudetui.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/claudetui"
 ok "claudetui"
