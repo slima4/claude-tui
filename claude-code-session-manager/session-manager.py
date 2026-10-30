@@ -358,7 +358,19 @@ def cmd_resume(args):
 
     full_id = path.stem
     print(f"  {GREEN}Resuming session {full_id[:8]}...{RESET}")
-    os.execvp("claude", ["claude", "--resume", full_id])
+    # The claudetui wrapper runs Python without the user's PYTHONHOME/PYTHONPATH
+    # and keeps them in CLAUDETUI_ORIG_* (see _restore_python_env in claudetui.py).
+    # claude should get them back, not the dispatcher's injected PYTHONPATH.
+    env = os.environ.copy()
+    for var in ("PYTHONHOME", "PYTHONPATH"):
+        marker = f"CLAUDETUI_ORIG_{var}"
+        if marker in env:
+            orig = env.pop(marker)
+            if orig:
+                env[var] = orig
+            else:
+                env.pop(var, None)
+    os.execvpe("claude", ["claude", "--resume", full_id], env)
 
 
 def cmd_diff(args):

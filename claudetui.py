@@ -163,6 +163,26 @@ def _is_sniffer_url(url, port_dir):
     return is_local and port is not None and str(port) in _sniffer_ports(port_dir)
 
 
+def _restore_python_env(env):
+    """Put the user's PYTHONHOME/PYTHONPATH back into `env`, in place.
+
+    Our own interpreter must not see them (see the wrapper in install.sh), but
+    a process launched on the user's behalf should. The wrapper keeps the
+    originals in CLAUDETUI_ORIG_*; an empty one means the variable was unset
+    (Python treats empty and unset alike). Without the wrapper there is no
+    such marker and `env` is left as it is.
+    """
+    for var in ("PYTHONHOME", "PYTHONPATH"):
+        marker = f"CLAUDETUI_ORIG_{var}"
+        if marker not in env:
+            continue
+        orig = env.pop(marker)
+        if orig:
+            env[var] = orig
+        else:
+            env.pop(var, None)
+
+
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ("-h", "--help"):
         print(HELP)
@@ -244,9 +264,11 @@ def main():
                 print(f"        claudetui sniffer --port {sniff_port} --upstream {prev_base}")
             os.environ["ANTHROPIC_BASE_URL"] = f"http://localhost:{sniff_port}"
             print(f"  Routing through sniffer on port {sniff_port}")
-        # execvp replaces this process — anything still buffered would be lost
+        env = os.environ.copy()
+        _restore_python_env(env)
+        # exec replaces this process — anything still buffered would be lost
         sys.stdout.flush()
-        os.execvp("claude", ["claude"] + claude_args)
+        os.execvpe("claude", ["claude"] + claude_args, env)
 
     if cmd not in SUBCOMMANDS:
         print(f"claudetui: unknown command '{cmd}'\n", file=sys.stderr)

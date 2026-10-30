@@ -132,7 +132,7 @@ Run from the repo root with `PYTHONPATH=.` so the suites can import the shared
 PYTHONPATH=. python3 claude-code-monitor/test_monitor.py -v      # monitor: parsing, waste model, chart
 PYTHONPATH=. python3 claude-code-sniffer/test_sniffer.py -v      # sniffer: formatters, SSE, session tracker, compaction
 PYTHONPATH=. python3 claude-code-statusline/test_statusline.py -v # statusline: input parsing, rendering, context limits
-PYTHONPATH=. python3 test_claudetui.py -v                        # dispatcher: version detection, sniffer discovery
+PYTHONPATH=. python3 test_claudetui.py -v                        # dispatcher: version detection, sniffer discovery, installed wrapper
 ```
 
 `tests.yml` runs all four suites plus the syntax check on every push to main
@@ -189,6 +189,7 @@ The Homebrew formula lives at [`slima4/homebrew-claude-tui`](https://github.com/
 ## Gotchas
 
 - **`python3 claudetui.py uninstall`** removes the repo directory!
+- **Wrapper scrubs `PYTHONHOME`/`PYTHONPATH`**: the `claudetui` wrapper runs Python without them, since an inherited value points at someone else's interpreter and aborts startup. The originals travel in `CLAUDETUI_ORIG_PYTHONHOME` / `CLAUDETUI_ORIG_PYTHONPATH`, and the two places that launch `claude` — `claudetui sniff` and `claudetui sessions resume` — restore them first (`_restore_python_env()` in `claudetui.py`, an inline copy in `session-manager.py`). The wrapper is written twice — `install.sh` and the brew formula in the tap — so change both together.
 - **OAuth Rate Limiting**: Usage API frequently returns 429. `claude_tui_core/network.py` handles exponential backoff (2min → 4min → 8min) and preserves cache.
 - **Widget API**: Widget functions have signature `widget_fn(frame, ratio) -> list[str]` returning exactly 3 rows.
 - **Model Registry**: Centralized in `claude_tui_core/models.py`. Sniffer uses a fuzzy-matching wrapper to support abbreviated model IDs.

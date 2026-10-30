@@ -4,6 +4,7 @@
 Usage: python3 test_claudetui.py -v
 """
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -160,6 +161,148 @@ class TestIsSnifferUrl(unittest.TestCase):
     def test_malformed_url(self):
         self.assertFalse(self.check("http://localhost:not-a-port"))
         self.assertFalse(self.check(""))
+
+
+# ── Python environment scrub ──────────────────────────────────────
+
+class TestRestorePythonEnv(unittest.TestCase):
+    def test_restores_what_the_wrapper_saved(self):
+        env = {"CLAUDETUI_ORIG_PYTHONHOME": "/opt/app/usr",
+               "CLAUDETUI_ORIG_PYTHONPATH": "/opt/app/lib"}
+        claudetui._restore_python_env(env)
+        self.assertEqual(env, {"PYTHONHOME": "/opt/app/usr",
+                               "PYTHONPATH": "/opt/app/lib"})
+
+    def test_original_beats_the_path_the_dispatcher_injected(self):
+        env = {"PYTHONPATH": "/install/dir:/opt/app/lib",
+               "CLAUDETUI_ORIG_PYTHONHOME": "",
+               "CLAUDETUI_ORIG_PYTHONPATH": "/opt/app/lib"}
+        claudetui._restore_python_env(env)
+        self.assertEqual(env, {"PYTHONPATH": "/opt/app/lib"})
+
+    def test_unset_originals_are_removed_not_left_injected(self):
+        # The wrapper saves an empty string when the variable was not set; the
+        # dispatcher's own PYTHONPATH must not reach claude in that case.
+        env = {"PYTHONPATH": "/install/dir",
+               "CLAUDETUI_ORIG_PYTHONHOME": "", "CLAUDETUI_ORIG_PYTHONPATH": ""}
+        claudetui._restore_python_env(env)
+        self.assertEqual(env, {})
+
+    def test_untouched_without_the_wrapper(self):
+        # Run straight from a checkout there is nothing saved, so whatever
+        # the environment holds is left alone.
+        env = {"PYTHONPATH": "/mine", "HOME": "/h"}
+        claudetui._restore_python_env(env)
+        self.assertEqual(env, {"PYTHONPATH": "/mine", "HOME": "/h"})
+
+
+INSTALL_SH = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "install.sh")
+HAVE_BASH = shutil.which("bash") is not None and shutil.which("env") is not None
+
+
+@unittest.skipUnless(HAVE_BASH, "needs bash and env")
+class TestInstalledWrapper(unittest.TestCase):
+    """The claudetui wrapper install.sh writes, rendered and run for real."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, ignore_errors=True)
+        with open(INSTALL_SH) as f:
+            match = re.search(r'cat > "\$BIN_DIR/claudetui" << EOF\n(.*?)\nEOF\n',
+                              f.read(), re.S)
+        assert match, "wrapper heredoc not found in install.sh"
+        # Let bash expand the heredoc exactly as the installer would.
+        rendered = subprocess.run(
+            ["bash", "-c", f"cat <<EOF\n{match.group(1)}\nEOF"],
+            env={**os.environ,
+                 "PYTHON_ABS": sys.executable,
+                 "INSTALL_DIR": os.path.dirname(CLAUDETUI_PY)},
+            capture_output=True, text=True, check=True,
+        ).stdout
+        cls.wrapper = os.path.join(cls.tmp, "claudetui")
+        with open(cls.wrapper, "w") as f:
+            f.write(rendered)
+        os.chmod(cls.wrapper, 0o755)
+
+        # A stand-in for `claude` that reports what environment it received.
+        cls.bin = os.path.join(cls.tmp, "bin")
+        os.mkdir(cls.bin)
+        fake = os.path.join(cls.bin, "claude")
+        with open(fake, "w") as f:
+            f.write('#!/bin/sh\n'
+                    'echo "ARGS=$*"\n'
+                    'echo "PYTHONHOME=${PYTHONHOME-unset}"\n'
+                    'echo "PYTHONPATH=${PYTHONPATH-unset}"\n'
+                    'echo "ORIG_HOME=${CLAUDETUI_ORIG_PYTHONHOME-unset}"\n'
+                    'echo "ORIG_PATH=${CLAUDETUI_ORIG_PYTHONPATH-unset}"\n')
+        os.chmod(fake, 0o755)
+
+        # A session for `sessions resume` to find under the fake HOME.
+        project = os.path.join(cls.tmp, ".claude", "projects", "proj")
+        os.makedirs(project)
+        with open(os.path.join(project, "abc123.jsonl"), "w") as f:
+            f.write("{}\n")
+
+    def run_wrapper(self, args, **env):
+        base = {k: v for k, v in os.environ.items()
+                if k not in ("PYTHONHOME", "PYTHONPATH")}
+        # Keep the real HOME out of reach: sniff looks for running sniffers there.
+        base.update(HOME=self.tmp, PATH=f"{self.bin}{os.pathsep}{base['PATH']}")
+        base.update(env)
+        return subprocess.run([self.wrapper, *args], env=base,
+                              capture_output=True, text=True, timeout=30)
+
+    def test_inherited_pythonhome_does_not_break_it(self):
+        r = self.run_wrapper(["--version"], PYTHONHOME="/nonexistent/usr/")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("claudetui", r.stdout)
+
+    def test_inherited_pythonpath_is_not_loaded(self):
+        poisoned = os.path.join(self.tmp, "poisoned")
+        os.makedirs(poisoned, exist_ok=True)
+        with open(os.path.join(poisoned, "sitecustomize.py"), "w") as f:
+            f.write('print("POISONED")\n')
+        r = self.run_wrapper(["--version"], PYTHONPATH=poisoned)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("POISONED", r.stdout)
+
+    def test_sniff_hands_claude_the_original_environment(self):
+        r = self.run_wrapper(["sniff"], PYTHONHOME="/nonexistent/usr/",
+                             PYTHONPATH="/my/libs")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("PYTHONHOME=/nonexistent/usr/", r.stdout)
+        self.assertIn("PYTHONPATH=/my/libs", r.stdout)
+        # ...and the bookkeeping does not leak into claude.
+        self.assertIn("ORIG_HOME=unset", r.stdout)
+        self.assertIn("ORIG_PATH=unset", r.stdout)
+
+    def test_sniff_adds_nothing_when_the_user_had_nothing(self):
+        r = self.run_wrapper(["sniff"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("PYTHONHOME=unset", r.stdout)
+        self.assertIn("PYTHONPATH=unset", r.stdout)
+
+    def test_resume_hands_claude_the_original_environment(self):
+        r = self.run_wrapper(["sessions", "resume", "abc123"],
+                             PYTHONHOME="/nonexistent/usr/",
+                             PYTHONPATH="/my/libs")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ARGS=--resume abc123", r.stdout)
+        self.assertIn("PYTHONHOME=/nonexistent/usr/", r.stdout)
+        self.assertIn("PYTHONPATH=/my/libs", r.stdout)
+        self.assertIn("ORIG_HOME=unset", r.stdout)
+        self.assertIn("ORIG_PATH=unset", r.stdout)
+
+    def test_resume_does_not_leak_the_dispatchers_pythonpath(self):
+        # The dispatcher injects its own directory into PYTHONPATH for the
+        # session manager; claude must not inherit that.
+        r = self.run_wrapper(["sessions", "resume", "abc123"])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("ARGS=--resume abc123", r.stdout)
+        self.assertIn("PYTHONPATH=unset", r.stdout)
+        self.assertIn("PYTHONHOME=unset", r.stdout)
 
 
 if __name__ == "__main__":
